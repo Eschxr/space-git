@@ -109,14 +109,6 @@ class ProcessingManifest(Contract):
     errors: tuple[str, ...]
 
 
-class Detector(Protocol):
-    def detect(self, rgb_image, prompts, config) -> list[DetectionBox]: ...
-
-
-class Segmenter(Protocol):
-    def segment(self, rgb_image, boxes, config) -> list[InstanceMask]: ...
-
-
 class Embedder(Protocol):
     def embed(self, rgb_image, instance_masks, boxes, config) -> list[ObjectEmbedding]: ...
 

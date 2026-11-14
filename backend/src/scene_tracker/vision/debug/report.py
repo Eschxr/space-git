@@ -22,7 +22,11 @@ def report(run_id, cameras, files, provider="fake"):
             else "<p>REAL adapters; inspect each camera status for execution errors. "
             "Model quality is not certified. "
         )
-        + "No tracking, cross-view association or change proposals yet.</p>",
+        + (
+            "Camera-local tracks and proposed image-view changes are available.</p>"
+            if "debug/tracking.json" in files
+            else "Standalone extraction only; tracking/review require the database workflow.</p>"
+        ),
     ]
     for result in cameras:
         role = "OVERHEAD" if result.camera_id.value == "cam_04" else "side"

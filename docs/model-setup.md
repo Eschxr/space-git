@@ -1,169 +1,123 @@
-# Real vision model setup (Phase 4)
+# YOLOE + DINOv2 operator setup
 
-The real adapters are implemented behind the same canonical contracts as the fake
-pipeline. CPU contract tests inject stub upstream calls; they do not load pretrained
-weights or validate model quality. Real inference has **not** been run in this workspace:
-operator checkpoints, BERT assets, source checkouts and the optional ML runtime are
-not installed. `model-readiness` currently exits 2 with `model_unavailable` and the
-missing Grounding DINO checkpoint/hash requirement. There is no fake fallback.
+Real inference is implemented but has **not been exercised on this host**. The
+optional ML runtime, local checkpoints and pinned DINOv2 checkout are absent.
+Offline/stub tests validate contracts, not pretrained quality. Missing assets fail
+with `model_unavailable`; real mode never substitutes fake inference. No test or
+startup command downloads weights.
 
-## Source pins and runtime
+## 1. Install the optional worker environment
 
-Use clean operator-managed checkouts at these exact commits. The worker verifies
-Git HEAD, rejects tracked modifications and verifies imports resolve inside them.
-No checkout, dependency installer or weight downloader runs during inference/tests.
+From `backend/`, using Python 3.11:
 
-| Component | Official source | Commit |
+```bash
+uv sync --locked --group vision
+```
+
+The lock pins Ultralytics **8.4.0**, Torch **2.7.1**, TorchVision **0.22.1** and
+OpenCV **4.11.0.86**. Existing Torch/DINOv2 preprocessing is retained. These versions
+resolve together; upstream runtime/device compatibility remains unvalidated until
+the following real smoke succeeds on your hardware. CPU development uses
+`uv sync --locked --no-group vision`, which installs no Torch or Ultralytics.
+NumPy, pycocotools, Pillow and SciPy are CPU worker dependencies.
+
+macOS: select CPU. NVIDIA Linux: select an available CUDA device and a driver
+compatible with the locked Torch wheel's CUDA runtime. No Grounding DINO extension
+build, SAM package, BERT, Transformers, Hydra or external text encoder is needed.
+DINOv2's backbone uses Torch directly; xFormers is optional and not installed.
+
+## 2. Supply local assets explicitly
+
+Acquire these separately through the official distribution pages, outside source
+control. The commands below do not acquire weights:
+
+| Asset | Exact selection | Source |
 |---|---|---|
-| Grounding DINO Swin-T OGC | [IDEA-Research/GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) | `856dde20aee659246248e20734ef9ba5214f5e44` |
-| SAM 2.1 small | [facebookresearch/sam2](https://github.com/facebookresearch/sam2) | `2b90b9f5ceec907a1c18123530e92e794ad901a4` |
-| DINOv2 ViT-S/14 | [facebookresearch/dinov2](https://github.com/facebookresearch/dinov2) | `7764ea0f912e53c92e82eb78a2a1631e92725fc8` |
+| YOLOE | `yoloe-11s-seg-pf.pt` | [Official release](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-11s-seg-pf.pt), [YOLOE docs](https://docs.ultralytics.com/models/yoloe/) |
+| DINOv2 | `dinov2_vits14_pretrain.pth`, ViT-S/14 | [Official checkpoint](https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth) |
+| DINOv2 source | `7764ea0f912e53c92e82eb78a2a1631e92725fc8` | [Official source](https://github.com/facebookresearch/dinov2/tree/7764ea0f912e53c92e82eb78a2a1631e92725fc8) |
 
-Clone these repositories yourself into a directory outside the application source,
-then `git checkout --detach COMMIT` in each checkout. Set absolute source paths in
-`.env`. Keep checkouts separate from the API package; no root uv workspace is created.
-The Python worker adds verified checkout roots to its import path. SAM 2 configuration
-files remain in the source tree, so this also avoids package-data installation drift.
+Clone the source yourself and detach at that exact commit. Keep the checkout clean
+and separate from the application package. The worker verifies its HEAD, tracked
+modifications and import location; no `torch.hub` or source installer is called.
+DINOv2 is constructed with `pretrained=False` and loads the local state dictionary.
+The YOLOE prompt-free checkpoint never uses `set_classes()`; a prompted or newer
+checkpoint is not an automatic replacement.
 
-From `backend/`, install the locked optional runtime:
-
-```bash
-uv sync --group vision
-```
-
-The group pins Torch 2.7.1, TorchVision 0.22.1, Transformers 4.49.0, timm 0.9.16,
-Hydra 1.3.2, iopath 0.1.10, OpenCV headless 4.11.0.86 and SciPy 1.15.3. The standard
-PyPI Linux Torch wheel locks CUDA 12.6 runtime dependencies; macOS uses the platform
-wheel and `VISION_DEVICE=cpu`. CPU CI uses `uv sync --no-group vision`, with no Torch
-installation. The shared lock resolves both groups, but only selected groups install.
-This resolver success is not a claim of tested upstream runtime compatibility.
-
-Grounding DINO CUDA attention requires its compiled `_C` extension. On a Linux NVIDIA
-worker, install a compatible CUDA 12.6 toolkit/NVCC and driver, set `CUDA_HOME`, and
-build against the installed Torch pair from the same pinned source:
-
-```bash
-# Run in backend/ with VISION_GROUNDING_SOURCE_DIR exported as an absolute path:
-uv pip install --no-deps --no-build-isolation -e "$VISION_GROUNDING_SOURCE_DIR"
-```
-
-The [official build recipe](https://github.com/IDEA-Research/GroundingDINO/blob/856dde20aee659246248e20734ef9ba5214f5e44/setup.py)
-chooses CUDA extensions when the toolkit/device are available. Runtime initialization
-requires `_C` for a CUDA device and records its hash/device/runtime. If compilation
-fails, record the actual error and use explicitly selected CPU mode for an operator
-smoke where practical; never silently change device/provider. The official attention
-module has a [CPU Torch path](https://github.com/IDEA-Research/GroundingDINO/blob/856dde20aee659246248e20734ef9ba5214f5e44/groundingdino/models/GroundingDINO/ms_deform_attn.py).
-CPU inference can be slow. SAM 2 is imported from its pinned checkout; optional
-hole/sprinkle postprocessing and dynamic stability postprocessing are explicitly disabled,
-so its optional CUDA connected-components extension is not required by this adapter.
-No CUDA build or full upstream model loading was attempted on this host.
-
-## Operator-provided assets
-
-Acquire files separately from their official distribution pages. Never include them
-in source control, CI fixtures, container images or release archives.
-
-- Grounding DINO: [Swin-T OGC checkpoint](https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth),
-  paired with the pinned `groundingdino/config/GroundingDINO_SwinT_OGC.py`.
-- SAM 2.1: [small checkpoint](https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt),
-  paired with `configs/sam2.1/sam2.1_hiera_s.yaml` in the pinned package.
-- DINOv2: [ViT-S/14 checkpoint](https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth),
-  loaded into `dinov2_vits14(pretrained=False)` with strict state matching.
-- Grounding DINO additionally uses the tokenizer/encoder assets for
-  [google-bert/bert-base-uncased](https://huggingface.co/google-bert/bert-base-uncased).
-  Supply an offline directory containing `config.json`, `tokenizer_config.json`,
-  `vocab.txt` and `model.safetensors` or `pytorch_model.bin`, plus any accompanying
-  tokenizer files. No remote model/tokenizer lookup is performed: worker initialization
-  forces Hugging Face/Transformers offline modes and configures this local directory.
-
-Compute checkpoint hashes with `shasum -a 256 PATH` (or `sha256sum` on Linux), compare
-against trusted distribution information when available, and set the expected hashes
-in `.env`. These configured hashes enforce reproducibility; they are operator-supplied,
-not fabricated upstream checksum claims. To compute the directory fingerprint used for BERT:
-
-```bash
-uv run --no-group vision python -c \
- 'import sys; from pathlib import Path; from scene_tracker.vision.readiness import directory_hash; print(directory_hash(Path(sys.argv[1])))' \
- /absolute/path/to/bert-base-uncased
-```
-
-Configure `.env` using the keys in `.env.example`:
+Compute each hash with `shasum -a 256 PATH` (`sha256sum` on Linux), compare with trusted
+artifact information when available, and record it below. Hashes enforce the chosen
+operator artifacts; this repository does not invent upstream checkpoint checksums.
+Use only trusted checkpoints. Add absolute paths and your verified hashes to root `.env`:
 
 ```dotenv
 VISION_PROVIDER=real
+VISION_EXTRACTOR=yoloe
+YOLOE_CHECKPOINT=/absolute/path/to/yoloe-11s-seg-pf.pt
+YOLOE_SHA256=YOUR_VERIFIED_64_HEX_DIGEST
+YOLOE_CONFIDENCE=0.25
+YOLOE_IMGSZ=640
+YOLOE_DEVICE=cpu
 VISION_DEVICE=cpu
-VISION_GROUNDING_SOURCE_DIR=/absolute/path/to/GroundingDINO
-VISION_SAM2_SOURCE_DIR=/absolute/path/to/sam2
 VISION_DINOV2_SOURCE_DIR=/absolute/path/to/dinov2
-VISION_GROUNDING_CHECKPOINT=/absolute/path/to/groundingdino_swint_ogc.pth
-VISION_GROUNDING_SHA256=YOUR_VERIFIED_64_HEX_DIGEST
-VISION_SAM2_CHECKPOINT=/absolute/path/to/sam2.1_hiera_small.pt
-VISION_SAM2_SHA256=YOUR_VERIFIED_64_HEX_DIGEST
 VISION_DINOV2_CHECKPOINT=/absolute/path/to/dinov2_vits14_pretrain.pth
 VISION_DINOV2_SHA256=YOUR_VERIFIED_64_HEX_DIGEST
-VISION_BERT_DIR=/absolute/path/to/bert-base-uncased
-VISION_BERT_SHA256=YOUR_VERIFIED_DIRECTORY_DIGEST
+MODEL_CACHE_DIR=/absolute/path/to/model-cache
 ```
 
-For CUDA use `VISION_DEVICE=cuda:0` (or another available device index). Optional
-settings include `VISION_BOX_THRESHOLD=0.35`, `VISION_TEXT_THRESHOLD=0.25`,
-`VISION_NMS_IOU=0.5`, `VISION_CROP_PADDING=0.1`, `VISION_EMBEDDING_BATCH_SIZE=16`,
-and `MODEL_CACHE_DIR`. Default model names are fixed to the listed architectures.
-`VISION_PROMPTS` accepts a JSON array of phrases as the deployment default.
-`POST /api/v1/environments` also accepts a `prompts` array per environment, which
-supersedes that default for real processing. Empty/dotted phrases are rejected;
-the model additionally rejects captions exceeding its 256-token limit. A closed
-prompt catalogue cannot guarantee detection of unknown object types.
+For CUDA select `YOLOE_DEVICE=cuda:0` and `VISION_DEVICE=cuda:0` explicitly. No
+fallback to CPU is performed on a device error. Optional crop/batch settings are
+`VISION_CROP_PADDING=0.1`, `VISION_EMBEDDING_BATCH_SIZE=16`, `VISION_MIN_MASK_PIXELS=16`.
+Environment prompts are legacy metadata and are ignored by this extractor.
 
-## Readiness and manual inference
+## 3. Check files, then load models, then infer
+
+From `backend/`:
 
 ```bash
-cd backend
-# CPU-only asset hashes/source/config/BERT checks; does not import Torch:
-uv run --env-file ../.env --no-group vision scene-tracker model-readiness
-# Worker-side model load, dependency/device/extension validation; no inference:
-uv run --env-file ../.env --group vision scene-tracker model-readiness --runtime
-# Manual-only real inference on one four-image directory; output must not exist:
-uv run --env-file ../.env --group vision scene-tracker model-smoke \
+# CPU-only local file hashes and source checks:
+uv run --env-file ../.env --locked --no-group vision scene-tracker model-readiness
+# Worker-side real initialization; no inference:
+uv run --env-file ../.env --locked --group vision scene-tracker model-readiness --runtime
+# Real inference on exactly four supplied images, in a NEW output directory:
+uv run --env-file ../.env --locked --group vision scene-tracker model-smoke \
   --input /absolute/path/to/four-images --output /absolute/path/to/new-smoke-output
 ```
 
-The API performs asset preflight before enqueueing and snapshots full resolved paths,
-hashes, source commits, thresholds, prompt catalogue and model settings into the run
-configuration hash. Files must be mounted at those same paths on the worker. The worker
-rechecks them against the snapshot and loads each model once for all four frames in
-its spawned child process. API imports never load Torch or upstream model packages.
-File preflight reports `files_verified_runtime_unprobed`; it cannot prove a remote
-worker's GPU/runtime health. Runtime readiness reports `models_loaded_inference_unvalidated`.
-Neither means visual quality is validated. Missing/changed assets, bad source pins,
-unavailable devices and initialization errors report `model_unavailable` with setup
-instructions; queued-worker failures remain durable failed runs with explicit errors.
+Use filenames `cam_01.jpg` through `cam_04.jpg` (PNG/WebP also supported); cam_04 is
+always overhead. Inspect each camera's masks/boxes, crop sheet, JSON, report and
+errors. `files_verified_runtime_unprobed` proves only local asset checks;
+`models_loaded_inference_unvalidated` proves initialization only. Neither certifies
+visual quality. Record hardware/package/device details and inspect actual outputs
+before claiming real inference is validated. Failure exits unsuccessfully and
+preserves available diagnostics; there is no fake fallback.
 
-The standalone smoke uses local immutable storage and JSON persistence rather than
-PostgreSQL/RQ. It preserves originals, writes camera-specific masks/vectors/overlays,
-`run.json`, `manifest.json`, `summary.html` and `inspection.zip`. Failures preserve
-available diagnostics and exit unsuccessfully. The normal API/worker path persists
-those outputs in PostgreSQL/Silo and offers signed URLs as in Phase 3.
+The standalone smoke writes local immutable originals and extraction evidence without
+PostgreSQL/RQ. Tracking, review and accepted history require the API/worker workflow.
+YOLOE uses canonical RGB input with retina masks in original pixel dimensions.
+DINOv2 retains mask-aware gray-127 backgrounds, configured crop padding, square
+letterboxing, 224px bicubic resizing, ImageNet mean/std and normalized 384-dimensional
+float32 vectors. Missing/tiny masks produce explicit unavailable embedding evidence.
 
-## Processing/provenance and license scope
+## 4. Run through the durable API
 
-Grounding DINO uses the official 800-pixel short-side/1333 maximum resize and ImageNet
-RGB normalization. It converts normalized cxcywh outputs into clipped oriented-frame
-pixel xyxy boxes. Same-label NMS preserves threshold/suppression decisions and
-alternatives in each camera's `detector_candidates.json`. Different labels remain
-alternatives; scores are not calibrated probabilities. SAM 2 encodes each nonempty
-frame once and segments all boxes with stable input IDs, retaining binary RLE and
-quality scores. DINOv2 uses mask-aware gray-127 backgrounds, box padding, aspect-
-preserving square letterboxing, 224px bicubic resize, ImageNet RGB mean/std and L2
-normalization; invalid/zero vectors fail explicitly. Embeddings have 384 float32
-values with model/dimension/byte-order/hash metadata. No associations are inferred.
+Start existing PostgreSQL/Silo/Redis, then from `backend/`:
 
-The pinned [Grounding DINO license](https://github.com/IDEA-Research/GroundingDINO/blob/856dde20aee659246248e20734ef9ba5214f5e44/LICENSE)
-is Apache-2.0; its official README distributes the stated checkpoint under that
-repository's terms. The [SAM 2 README](https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/README.md)
-states its code/checkpoints use Apache-2.0. The standard DINOv2 ViT-S/14
-[model card](https://github.com/facebookresearch/dinov2/blob/7764ea0f912e53c92e82eb78a2a1631e92725fc8/MODEL_CARD.md)
-and [BERT model card](https://huggingface.co/google-bert/bert-base-uncased) identify
-Apache-2.0. Preserve their notices and review the exact artifact terms before deployment;
-this does not extend to unrelated specialty DINOv2 models. PointDiT and gated DINOv3
-remain separate Phase 9 work, with no dependency changes to reconstruction/.
+```bash
+uv run --env-file ../.env --locked --no-group vision alembic upgrade head
+uv run --env-file ../.env --locked --no-group vision uvicorn scene_tracker.api.main:app
+# In another terminal:
+uv run --env-file ../.env --locked --group vision scene-tracker worker vision
+```
+
+Create an environment with `{"name":"room"}`, upload four files, and process with
+`{"preset":"default"}`. The API performs CPU-only preflight, snapshots local asset
+paths/hashes/settings, and queues IDs; the worker rechecks those exact assets and
+loads one YOLOE instance and one DINOv2 instance for the four views in each spawned
+job child. Paths must be mounted identically in API/worker environments. API imports
+remain free of Torch, Ultralytics, NumPy and SciPy.
+
+[API examples](api.md) cover proposed changes, review, revision commits and highlights.
+[Third-party notices](../THIRD_PARTY_NOTICES.md) link YOLOE/Ultralytics AGPL-3.0 or
+commercial licensing and DINOv2 Apache-2.0 terms. Public source hosting alone does not
+establish license compliance. PointDiT and its gated DINOv3 weights remain independent
+Python 3.12 future P9 work, outside this refactor.

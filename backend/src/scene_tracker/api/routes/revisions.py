@@ -37,7 +37,7 @@ def visualize(item, services, environment_id):
     value = dict(item)
     for side in ("before_ref", "after_ref"):
         ref = value.get(side)
-        if ref:
+        if isinstance(ref, dict) and {"capture_id", "frame_id"}.issubset(ref):
             frame = next(
                 f
                 for f in services.repository.capture(UUID(ref["capture_id"]))["frames"]

@@ -4,7 +4,14 @@ import numpy as np
 
 
 def normalize_label(label):
-    words = " ".join(label.lower().strip().split()).rstrip("s")
+    words = " ".join(label.lower().strip().split())
+    words = {
+        "chairs": "chair",
+        "boxes": "box",
+        "seats": "seat",
+        "tables": "table",
+        "monitors": "monitor",
+    }.get(words, words)
     return {"seat": "chair", "carton": "box", "computer monitor": "monitor"}.get(words, words)
 
 

@@ -3,13 +3,15 @@
 from pathlib import Path
 
 from scene_tracker.core.model_pins import PINS
-from scene_tracker.vision.legacy.readiness import ModelUnavailable, sha256_file, verify_source
+from scene_tracker.vision.assets import ModelUnavailable, sha256_file, verify_source
 
 ULTRALYTICS_VERSION = "8.4.0"
 
 
 def preflight(settings, source_verifier=verify_source):
     try:
+        if settings.extractor != "yoloe":
+            raise ModelUnavailable("real mode requires VISION_EXTRACTOR=yoloe")
         checkpoints = {}
         for name, path, expected in [
             ("yoloe", settings.yoloe_checkpoint, settings.yoloe_sha256),

@@ -18,6 +18,7 @@ class YOLOEExtractor:
         self.last_candidates = []
 
     def extract(self, rgb_image, config):
+        self.last_candidates = []
         context, _ = config
         outputs = self.model.predict(
             source=rgb_image,
@@ -40,11 +41,13 @@ class YOLOEExtractor:
             array(result.boxes.conf),
             array(result.boxes.cls),
         )
-        if boxes.shape != (len(scores), 4) or classes.shape != scores.shape:
+        if scores.ndim != 1 or boxes.shape != (len(scores), 4) or classes.shape != scores.shape:
             raise ValueError("YOLOE box/score/class shape mismatch")
         masks = None if result.masks is None else array(result.masks.data)
         if masks is not None and masks.shape != (len(boxes), context.height, context.width):
             raise ValueError("retina masks must map exactly to canonical original image dimensions")
+        if masks is not None and (not np.isfinite(masks).all() or not np.isin(masks, [0, 1]).all()):
+            raise ValueError("YOLOE retina masks must be finite binary arrays")
         detections, segments = [], []
         self.last_candidates = []
         for i, (bbox, score, cls) in enumerate(zip(boxes, scores, classes, strict=True)):

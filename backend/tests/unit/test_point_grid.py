@@ -93,6 +93,10 @@ def test_nearest_resize_crop_flip_pad_and_no_changes():
     expected = np.zeros((5, 3), bool)
     expected[3:5, 1:3] = True
     np.testing.assert_array_equal(moved, expected)
+    asymmetric = np.zeros((4, 4), bool)
+    asymmetric[0, 0] = True
+    flipped = map_mask_to_point_grid(asymmetric, transform(flip_x=True))
+    assert np.argwhere(flipped).tolist() == [[0, 3]]
     rgb = np.arange(48, dtype=np.uint8).reshape(4, 4, 3)
     _, colors, info = colorize_point_grid(grid(), rgb, manifest(), {}, transform())
     np.testing.assert_array_equal(colors, rgb.reshape(-1, 3))

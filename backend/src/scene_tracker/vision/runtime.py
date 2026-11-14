@@ -20,6 +20,9 @@ def load_models(settings):
 
         if importlib.metadata.version("ultralytics") != ULTRALYTICS_VERSION:
             raise ModelUnavailable("Ultralytics version does not match pinned runtime")
+        for package, version in (("torch", "2.7.1"), ("torchvision", "0.22.1")):
+            if importlib.metadata.version(package).split("+")[0] != version:
+                raise ModelUnavailable(f"{package} version does not match pinned runtime")
         for device in (settings.device, settings.yoloe_device):
             if device.startswith("cuda") and (
                 not torch.cuda.is_available()

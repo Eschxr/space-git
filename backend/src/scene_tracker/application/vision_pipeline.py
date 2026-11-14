@@ -1,4 +1,4 @@
-"""Camera-ordered fake fixture pipeline. All derivatives are immutable and run-scoped."""
+"""Camera-ordered extraction, evidence, tracking and changes; immutable run artifacts."""
 
 import hashlib
 import importlib.metadata
@@ -20,11 +20,9 @@ from scene_tracker.vision.contracts import (
 from scene_tracker.vision.debug.overlays import overlays, png
 from scene_tracker.vision.debug.report import bundle, report
 from scene_tracker.vision.detection.extractor_fake import FakeExtractor
-from scene_tracker.vision.detection.fake import FakeDetector
 from scene_tracker.vision.embeddings.fake import FakeEmbedder
 from scene_tracker.vision.masks import decode_mask
 from scene_tracker.vision.preprocessing import load_frame
-from scene_tracker.vision.segmentation.fake import FakeSegmenter
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +81,10 @@ def validate_alignment(context, boxes, masks, embeddings):
             raise ValueError("mask array shape mismatch")
 
 
-def process_fake(repository, run, capture, store, *, detector=None, segmenter=None, embedder=None):
+def process_fake(repository, run, capture, store, *, extractor=None, embedder=None):
     if run["model_manifest"]["config"]["provider"] != "fake":
         raise PipelineFailed("real provider cannot use fake pipeline")
-    return process_pipeline(
-        repository, run, capture, store, detector=detector, segmenter=segmenter, embedder=embedder
-    )
+    return process_pipeline(repository, run, capture, store, extractor=extractor, embedder=embedder)
 
 
 def process_pipeline(
@@ -97,37 +93,18 @@ def process_pipeline(
     capture,
     store,
     *,
-    detector=None,
-    segmenter=None,
     embedder=None,
     model_provenance=None,
     extractor=None,
 ):
     provider = run["model_manifest"]["config"]["provider"]
-    if provider == "real" and (
-        embedder is None or (extractor is None and (detector is None or segmenter is None))
-    ):
+    if provider == "real" and (embedder is None or extractor is None):
         raise PipelineFailed("real provider requires concrete adapters; fake fallback is forbidden")
     if provider not in {"fake", "real"}:
         raise PipelineFailed("unsupported vision provider")
     detector_called = False
-    detector, segmenter, embedder = (
-        detector or FakeDetector(),
-        segmenter or FakeSegmenter(),
-        embedder or FakeEmbedder(),
-    )
-    if extractor is None and provider == "real":
-
-        class InjectedPair:
-            def extract(self, rgb, config):
-                boxes = detector.detect(
-                    rgb, run["model_manifest"]["config"].get("prompts", []), config
-                )
-                self.last_candidates = getattr(detector, "last_candidates", [])
-                return boxes, segmenter.segment(rgb, boxes, config)
-
-        extractor = InjectedPair()
-    extractor = extractor or FakeExtractor(detector, segmenter)
+    extractor = extractor or FakeExtractor()
+    embedder = embedder or FakeEmbedder()
     start = time.perf_counter()
     writer = ArtifactWriter(repository, store, run["id"], capture["environment_id"])
     results, errors, timings = [], [], {}
@@ -152,9 +129,7 @@ def process_pipeline(
                 writer.json(
                     f"debug/{context.camera_id}/extractor.json",
                     extractor.last_candidates,
-                    "detector_candidates"
-                    if detector is not None and provider == "real"
-                    else "extractor_diagnostics",
+                    "extractor_diagnostics",
                     context.camera_id,
                 )
             timings[f"{context.camera_id}/extract"] = time.perf_counter() - stage_start

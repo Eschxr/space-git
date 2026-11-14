@@ -1,3 +1,9 @@
+> Implementation precedence: `CODEX_YOLOE_REFACTOR_PLAN.md` supersedes the old
+> Phases 4–8 vision/tracking architecture after the completed Phase 4 baseline.
+> Execute R0–R6 before the separate PointDiT P9 worker. Keep historical phase
+> records in `docs/implementation-status.md`; current checkpoints are tracked in
+> `docs/refactor-status.md`. Original safeguards and reconstruction isolation remain.
+
 # Fixed-Camera Scene Tracker — Codex Implementation Plan
 
 **Status:** Implementation specification, starting from a Git repository containing only a basic `README.md`.  

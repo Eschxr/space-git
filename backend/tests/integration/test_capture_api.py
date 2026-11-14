@@ -20,6 +20,7 @@ from scene_tracker.infrastructure.db.repositories import Repository
 from scene_tracker.infrastructure.queue.inline import InlineDispatcher
 from scene_tracker.infrastructure.storage.base import Blob
 from scene_tracker.infrastructure.storage.s3 import S3Store
+from scene_tracker.vision.detection.extractor_fake import FakeExtractor
 from scene_tracker.workers.jobs import execute_vision
 
 pytestmark = pytest.mark.integration
@@ -293,7 +294,11 @@ def test_camera_failure_retry_keeps_stored_outputs(api):
                 UUID(job),
                 UUID(run),
                 stage=lambda r, c: process_fake(
-                    api.services.repository, r, c, store, detector=FaultyDetector()
+                    api.services.repository,
+                    r,
+                    c,
+                    store,
+                    extractor=FakeExtractor(detector=FaultyDetector()),
                 ),
             )
         )
@@ -581,4 +586,133 @@ def test_highlight_api_temporal_roles_and_mock_export(api, tmp_path):
     assert (
         api.client.get(f"/api/v1/captures/{second['id']}/highlights?camera_id=cam_05").status_code
         == 422
+    )
+
+
+def test_full_fake_refactor_e2e(api, tmp_path):
+    """One-command gate: real storage/DB, deterministic model fixtures, synthetic points."""
+    import json
+    import os
+    from pathlib import Path
+
+    import numpy as np
+
+    from scene_tracker.domain.contracts import Mask
+    from scene_tracker.geometry.point_grid import (
+        GridTransform,
+        colorize_point_grid,
+        export_test_ply,
+    )
+    from scene_tracker.vision.masks import decode_mask
+
+    output = Path(os.environ.get("SCENE_TRACKER_E2E_OUTPUT", tmp_path / "e2e"))
+    output.mkdir(parents=True, exist_ok=False)
+    env_id = str(api.services.repository.create_environment("full fake refactor smoke")["id"])
+    first, run1, proposals1 = sequence_capture(api, env_id)
+    rev1, _ = approve_revision(api, env_id, first, proposals1, "baseline")
+    baseline = api.client.get(f"/api/v1/revisions/{rev1['id']}").json()
+    second, run2, proposals2 = sequence_capture(api, env_id, moved=True, added=True)
+    assert {p["type"] for p in proposals2} == {"moved_in_view", "appeared_in_view"}
+    rev2, body = approve_revision(api, env_id, second, proposals2, "move-and-new")
+    path = f"/api/v1/environments/{env_id}/revisions"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: api.client.post(path, json=body).json(), range(2)))
+    assert results[0]["id"] == results[1]["id"] == rev2["id"]
+    diff = api.client.get(f"/api/v1/revisions/{rev2['id']}/diff").json()
+    assert len(diff["changes"]) == 8
+    (output / "diff.json").write_text(json.dumps(diff, indent=2))
+    store = api.services.store_factory(UUID(env_id))
+    for capture_value, tag in ((first, "before"), (second, "after")):
+        for frame in capture_value["frames"]:
+            camera = frame["camera_id"]
+            url = f"/api/v1/captures/{capture_value['id']}/highlights"
+            manifest = api.client.get(
+                url, params={"camera_id": camera, "revision_id": rev2["id"]}
+            ).json()
+            (output / f"{tag}-{camera}-manifest.json").write_text(json.dumps(manifest, indent=2))
+            masks = {
+                r["mask_ref"]: decode_mask(
+                    Mask.model_validate_json(store.get(store.stat(r["mask_ref"])))
+                )
+                for r in manifest["regions"]
+            }
+            h, w = frame["height"], frame["width"]
+            y, x = np.indices((h, w))
+            points = np.stack([x / w, y / h, np.ones_like(x)], axis=-1).astype(float)
+            # Original colors come from the canonical immutable image; synthetic XYZ only.
+            from PIL import ImageOps
+
+            original = store.get(store.stat(frame["storage_key"]))
+            rgb = np.asarray(
+                ImageOps.exif_transpose(Image.open(io.BytesIO(original))).convert("RGB")
+            )
+            transform = GridTransform(
+                image_width=w,
+                image_height=h,
+                crop_xyxy=(0, 0, w, h),
+                resize_width=w,
+                resize_height=h,
+            )
+            xyz, colors, sidecar = colorize_point_grid(points, rgb, manifest, masks, transform)
+            export_test_ply(output / f"{tag}-{camera}", xyz, colors, sidecar)
+            # Preserve a source-colored synthetic cloud alongside its highlighted derivative.
+            src_xyz, src_rgb, src_meta = colorize_point_grid(
+                points, rgb, manifest | {"regions": []}, {}, transform
+            )
+            export_test_ply(output / f"{tag}-{camera}-source", src_xyz, src_rgb, src_meta)
+    debug = api.client.get(f"/api/v1/processing-runs/{run2['id']}/debug").json()
+    for artifact in debug["artifacts"]:
+        if artifact["kind"] in ("report", "inspection_bundle"):
+            name = "summary.html" if artifact["kind"] == "report" else "inspection.zip"
+            (output / name).write_bytes(store.get(store.stat(artifact["storage_key"])))
+    # Reprocessing is versioned and cannot alter accepted history.
+    from scene_tracker.core.tracking_settings import TrackingSettings
+
+    api.services.settings.tracking = TrackingSettings(movement_threshold=0.04)
+    reprocess = api.client.post(f"/api/v1/captures/{second['id']}/process", json={}).json()
+    assert reprocess["id"] != run2["id"]
+    api.services.dispatcher.drain(
+        lambda job, r: execute_vision(
+            api.services.repository, UUID(job), UUID(r), store_factory=api.services.store_factory
+        )
+    )
+    assert api.client.get(f"/api/v1/revisions/{rev1['id']}").json() == baseline
+    # A subsequent worker failure leaves all originals and both revisions unchanged.
+    failed_upload = api.client.post(f"/api/v1/environments/{env_id}/captures", files=files()).json()
+    api.client.post(f"/api/v1/captures/{failed_upload['id']}/process", json={})
+
+    def fail(*args):
+        raise RuntimeError("intentional post-revision processing failure")
+
+    with pytest.raises(RuntimeError, match="intentional"):
+        api.services.dispatcher.drain(
+            lambda job, r: execute_vision(api.services.repository, UUID(job), UUID(r), stage=fail)
+        )
+    assert api.client.get(f"/api/v1/revisions/{rev1['id']}").json() == baseline
+
+    def without_urls(value):
+        if isinstance(value, dict):
+            return {k: without_urls(v) for k, v in value.items() if not k.endswith("_url")}
+        if isinstance(value, list):
+            return [without_urls(v) for v in value]
+        return value
+
+    refreshed = api.client.get(f"/api/v1/revisions/{rev2['id']}/diff").json()
+    assert without_urls(refreshed) == without_urls(diff)
+    assert api.client.get(f"/api/v1/captures/{first['id']}").json() == first
+    assert api.client.get(f"/api/v1/captures/{second['id']}").json() == second
+    (output / "summary.json").write_text(
+        json.dumps(
+            {
+                "synthetic": True,
+                "pretrained_inference": False,
+                "pointdit_inference": False,
+                "environment_id": env_id,
+                "captures": [first["id"], second["id"]],
+                "runs": [run1["id"], run2["id"]],
+                "revisions": [rev1["id"], rev2["id"]],
+                "note": "Test services are cleaned; local exports remain.",
+            },
+            indent=2,
+        )
     )

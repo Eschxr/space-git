@@ -1,6 +1,6 @@
 # Data model
 
-Phase 1 defines all 17 planned tables as SQLAlchemy Core models in
+The original Phase 1 defined 17 planned tables as SQLAlchemy Core models in
 `backend/src/scene_tracker/infrastructure/db/models.py`. PostgreSQL UUIDs,
 timezone-aware timestamps, normal status/key columns and JSONB evidence/metadata
 keep domain contracts independent of GPU libraries. Vectors remain external float32
@@ -43,8 +43,31 @@ storage. Processing manifests retain per-camera contracts, input hashes, fake ad
 source hashes, preprocessing, package versions, timing and error provenance.
 
 
-Phase 4 migration `0003` adds nullable JSONB `environments.prompts`. A null catalogue
-uses deployment VisionSettings defaults. Real runs snapshot the resolved catalogue,
-model settings, checkpoint hashes, pinned source/config hashes and BERT fingerprint
-into config/manifest metadata; distinct versions/configurations create distinct hashes.
+Phase 4 migration `0003` adds nullable JSONB `environments.prompts`. In the historical Phase 4 path a null catalogue used deployment prompts. The current
+YOLOE path ignores prompts and snapshots only active model assets/settings. Different
+versions/configurations create distinct hashes.
 No image, prior run, accepted event or revision is overwritten by reprocessing.
+
+
+## Current refactor additions
+
+There are now **19** application tables. Migration `0004` adds last-seen capture and
+missing count to view tracks, run IDs on observations, and immutable
+`view_track_snapshots`. Snapshot/observation checks enforce camera, capture/run and
+environment consistency. Unique run/track observations prevent duplicate identity
+assignments. Mutable registry state is advisory; run snapshots are authoritative.
+
+Migration `0005` preserves old change-type values and adds the six image-view types,
+nullable camera/track proposal fields, revision idempotency/hash fields and immutable
+`revision_track_snapshots`. Legacy object IDs remain nullable; old object snapshots and
+revisions are not rewritten. Database triggers protect committed proposals and revision
+snapshots; copied `revision_changes.applied_payload` is the event-history authority.
+Environment locks serialize linear commits. Composite foreign keys prevent cross-space
+references. Accepted state applies only selected accepted proposals, preserving rejected
+history without adopting its changes. No automatic physical-object rows/links are created.
+
+Frozen migration DDL does not import the evolving model metadata. Service tests cover
+fresh upgrade/downgrade/re-upgrade and representative legacy event/revision preservation.
+Downgrading 0005 with new event types fails rather than deleting/converting those events;
+export/backup and explicit operator action are needed before a destructive rollback.
+No refactor test migrates or resets the development database.

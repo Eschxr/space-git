@@ -1,70 +1,10 @@
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-from scene_tracker.core.legacy_vision_settings import VisionSettings
-from scene_tracker.core.model_pins import PINS
-from scene_tracker.vision.legacy.readiness import (
-    ModelUnavailable,
-    directory_hash,
-    preflight,
-    sha256_file,
-    verify_source,
-)
-
-
-def assets(tmp_path):
-    values = {}
-    for name, prefix in [("groundingdino", "grounding"), ("sam2", "sam2"), ("dinov2", "dinov2")]:
-        checkpoint = tmp_path / f"{name}.weights"
-        checkpoint.write_bytes(b"stub assets for hash tests, not model weights")
-        source = tmp_path / name
-        source.mkdir()
-        values[prefix + "_checkpoint"] = checkpoint
-        values[prefix + "_sha256"] = sha256_file(checkpoint)
-        values[prefix + "_source_dir"] = source
-    for prefix, filename in [
-        ("grounding", "groundingdino/config/GroundingDINO_SwinT_OGC.py"),
-        ("sam2", "sam2/configs/sam2.1/sam2.1_hiera_s.yaml"),
-    ]:
-        path = values[prefix + "_source_dir"] / filename
-        path.parent.mkdir(parents=True)
-        path.write_text("stub config, never executed")
-    bert = tmp_path / "bert"
-    bert.mkdir()
-    for name in ["config.json", "vocab.txt", "tokenizer_config.json", "model.safetensors"]:
-        (bert / name).write_bytes(b"stub asset")
-    return VisionSettings(_env_file=None, **values, bert_dir=bert, bert_sha256=directory_hash(bert))
-
-
-def test_file_readiness_hashes_and_snapshot(tmp_path):
-    settings = assets(tmp_path)
-    seen = []
-
-    def verifier(path, pin):
-        seen.append(pin)
-        return str(path.resolve())
-
-    result = preflight(settings, source_verifier=verifier)
-    assert result["status"] == "files_verified_runtime_unprobed"
-    assert set(seen) == set(PINS.values())
-    assert Path(result["checkpoints"]["sam2"]["path"]).is_absolute()
-    settings.sam2_checkpoint.write_bytes(b"corrupted")
-    with pytest.raises(ModelUnavailable, match="SHA-256 mismatch"):
-        preflight(settings, source_verifier=verifier)
-
-
-def test_missing_assets_and_source_pin_fail_clearly(tmp_path):
-    with pytest.raises(ModelUnavailable, match="missing groundingdino checkpoint"):
-        preflight(VisionSettings(_env_file=None, grounding_checkpoint=None))
-    with pytest.raises(ModelUnavailable):
-        verify_source(tmp_path, "0" * 40)
-    settings = assets(tmp_path)
-    (settings.bert_dir / "vocab.txt").unlink()
-    with pytest.raises(ModelUnavailable, match="BERT"):
-        preflight(settings, source_verifier=lambda path, _: str(path.resolve()))
+from scene_tracker.core.vision_settings import VisionSettings
+from scene_tracker.vision.readiness import ModelUnavailable
 
 
 @pytest.mark.parametrize("command", ["model-readiness", "model-smoke"])
@@ -108,10 +48,19 @@ def test_real_pipeline_cannot_use_fake_defaults(tmp_path):
         )
 
 
-def test_settings_snapshot_preserves_model_cache_and_rejects_bad_prompts(tmp_path):
+def test_settings_snapshot_preserves_model_cache_and_rejects_wrong_extractor(tmp_path):
     settings = VisionSettings(_env_file=None, model_cache_dir=tmp_path)
     assert (
         VisionSettings.model_validate(settings.model_dump(mode="json")).model_cache_dir == tmp_path
     )
     with pytest.raises(ValueError):
-        VisionSettings(_env_file=None, prompts=("",))
+        VisionSettings(_env_file=None, extractor="groundingdino")
+
+
+def test_source_verification_rejects_missing_or_unpinned_checkout(tmp_path):
+    from scene_tracker.vision.assets import verify_source
+
+    with pytest.raises(ModelUnavailable, match="missing pinned"):
+        verify_source(tmp_path / "missing", "0" * 40)
+    with pytest.raises(ModelUnavailable, match="clean checkout"):
+        verify_source(tmp_path, "0" * 40)

@@ -67,3 +67,33 @@ def test_yoloe_readiness_is_local_and_does_not_require_old_models(tmp_path):
     checkpoint.write_bytes(b"changed")
     with pytest.raises(ModelUnavailable, match="SHA-256"):
         preflight(settings)
+
+
+@pytest.mark.parametrize(
+    "case", ["mask_shape", "mask_nan", "mask_nonbinary", "dimensions", "score_shape"]
+)
+def test_invalid_results_fail_explicitly(case):
+    ctx = FrameContext(
+        run_id=uuid4(), frame_id=uuid4(), camera_id="cam_01", width=4, height=4, trace_id="invalid"
+    )
+    result = SimpleNamespace(
+        orig_shape=(4, 4),
+        names={0: "chair"},
+        boxes=SimpleNamespace(
+            xyxy=np.array([[0, 0, 4, 4]]), conf=np.array([0.9]), cls=np.array([0])
+        ),
+        masks=SimpleNamespace(data=np.ones((1, 4, 4))),
+    )
+    if case == "mask_shape":
+        result.masks.data = np.ones((1, 2, 2))
+    elif case == "mask_nan":
+        result.masks.data[0, 0, 0] = np.nan
+    elif case == "mask_nonbinary":
+        result.masks.data[0, 0, 0] = 2
+    elif case == "dimensions":
+        result.orig_shape = (8, 8)
+    elif case == "score_shape":
+        result.boxes.conf = np.ones((1, 1))
+    model = SimpleNamespace(predict=lambda **kwargs: [result])
+    with pytest.raises(ValueError):
+        YOLOEExtractor(model, VisionSettings(_env_file=None)).extract(None, (ctx, None))

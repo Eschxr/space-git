@@ -1,4 +1,4 @@
-# API (Phase 4)
+# API — YOLOE image-view history
 
 OpenAPI is available at `/openapi.json` and interactive documentation at `/docs`.
 The service assumes one local operator without authentication. Bind to loopback.
@@ -58,7 +58,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/process \
   -H 'Content-Type: application/json' -d '{"preset":"fake-fixture","retry":true}'
 ```
 
-Phase 3 defaults to `fake-fixture` with `VISION_PROVIDER=fake`; `skeleton` is a
+Processing defaults to `fake-fixture` with `VISION_PROVIDER=fake`; `skeleton` is a
 compatibility alias. Both resolve to the same versioned pipeline configuration hash.
 A successful run stores fixture-derived detections, COCO compressed RLE masks,
 normalized fake float32 embeddings and debug artifacts. Its manifest states
@@ -115,32 +115,75 @@ is marked failed after writing available inspection diagnostics. An explicit ret
 uses a new run and never overwrites the old output or originals. A global storage
 outage can prevent saving the report itself; the database still records job failure.
 
-`temporal_matches.json`, `cross_view_candidates.json` and `change_proposals.json`
-are placeholders with `implemented: false`, planned phase numbers and empty item
-lists. They do not claim matching or change detection has run. No object identities
-are invented; overlays show view tracks as unassigned and physical objects as unlinked.
+`temporal_matches.json` and per-camera `matches.json` contain chosen references,
+candidate terms, unresolved alternatives and durable camera-local track IDs.
+`change_proposals.json` and changes overlays contain provisional image-view events.
+Cross-view association remains optional and explicitly unimplemented. Detections now
+include nullable `view_track_id`; physical-object links are never assigned automatically.
 
+## Real-provider configuration
 
-## Real-provider configuration (Phase 4)
+Set `VISION_PROVIDER=real`, `VISION_EXTRACTOR=yoloe` and use preset `default`.
+Supply the exact local YOLOE prompt-free checkpoint/hash and pinned DINOv2 source/weights;
+[model setup](model-setup.md) contains all commands. Legacy environment `prompts`
+remain readable/accepted but are ignored. No text encoder or `set_classes()` is used.
+The API verifies local hashes/source and snapshots paths/settings; the worker rechecks
+and loads YOLOE+DINOv2 in its spawned job child. Missing assets/device/dependencies
+fail explicitly, with no fake fallback. Model provenance is execution evidence,
+not a quality certification. `inference_performed` records a completed real extractor
+call; inspect per-camera status for later errors.
 
-Environment creation accepts optional `prompts: ["chair", "table", ...]`; responses
-return the stored catalogue (null means use `VISION_PROMPTS` defaults). This catalogue
-is used by the real detector. Labels alone are not object identity, and a closed
-catalogue cannot guarantee extraction of unseen types.
+## Proposed changes, review and revision commits
 
-Set `VISION_PROVIDER=real` in server configuration and use processing preset `default`.
-The server snapshots environment prompts, thresholds, model names, absolute checkpoint
-paths/hashes, BERT directory fingerprint, source commits/config hashes and device.
-Before enqueueing it runs local file/source/hash preflight without importing Torch.
-Its `files_verified_runtime_unprobed` result does not claim GPU readiness. The worker
-re-verifies that assets match the snapshot, imports only pinned local sources and loads
-all three models once for its four frames. Model/dependency/device failures produce
-explicit `model_unavailable` errors, with no fake adapters used in real mode.
+| Method | Route | Behavior |
+|---|---|---|
+| GET | `/api/v1/processing-runs/{id}/changes` | Proposed/accepted/rejected events; camera/track IDs, before/after refs and signed evidence URLs; limit 1–1000, offset |
+| POST | `/api/v1/change-proposals/{id}/decision` | `{ "status": "accepted" or "rejected" or "needs_review", "reason": "optional" }` |
+| POST | `/api/v1/environments/{id}/revisions` | Commit selected accepted proposals from one succeeded capture/run |
+| GET | `/api/v1/environments/{id}/revisions` | Newest-first revision page, limit 1–100, offset |
+| GET | `/api/v1/revisions/{id}` | Immutable revision metadata and approved camera-local track states |
+| GET | `/api/v1/revisions/{id}/diff` | Events against parent; optional ancestor `from_revision_id` |
+| GET | `/api/v1/captures/{id}/highlights` | Required camera_id, optional revision_id; canonical source-image regions |
 
-Real results use `scope: real_vision_pipeline` and `provider: real`. Their manifest's
-`inference_performed` flag records whether a real-provider detector call completed;
-per-camera statuses/errors show which stages finished. This flag is execution provenance,
-not accuracy certification. The same mask/vector/artifact APIs apply, now including
-`detector_candidates.json` with kept/suppressed/rejected raw-query evidence. Thresholds
-and NMS do not automatically resolve physical-object identities. See
-[model setup and manual smoke](model-setup.md) for exact commands and current validation limits.
+Changes are `appeared_in_view`, `moved_in_view`, `appearance_changed`,
+`missing_from_view`, `reappeared`, `uncertain`. They describe visible evidence;
+missing does not mean physically removed and label agreement is not identity.
+The first capture has initial appeared observations and no false moves. Review and
+commit those to establish an approved baseline. Empty scenes have processed state;
+this MVP's commit requires a nonempty selection. No cross-view merge is required.
+
+```bash
+curl http://127.0.0.1:8000/api/v1/processing-runs/RUN_ID/changes
+curl -X POST http://127.0.0.1:8000/api/v1/change-proposals/PROPOSAL_ID/decision \
+  -H 'Content-Type: application/json' -d '{"status":"accepted"}'
+curl -X POST http://127.0.0.1:8000/api/v1/environments/ENVIRONMENT_ID/revisions \
+  -H 'Content-Type: application/json' \
+  -d '{"capture_id":"CAPTURE_UUID","proposal_ids":["ACCEPTED_PROPOSAL_UUID"],"idempotency_key":"review-001","message":"Initial baseline"}'
+curl http://127.0.0.1:8000/api/v1/revisions/REVISION_ID/diff
+curl 'http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/highlights?camera_id=cam_01&revision_id=REVISION_ID'
+```
+
+A commit copies selected accepted event payloads and applies their camera-local states
+to the prior approved snapshot atomically. Rejected/unselected proposals remain
+queryable and do not alter that baseline. Identical repeated commits with the same
+key return the same revision (201); different contents with the key return 409.
+Previously committed proposals cannot be changed or committed again. Stale accepted
+baselines return 409; reprocess to review against the new parent. Changed processing
+configurations create new run IDs and never alter old detections/revisions.
+
+`reference_capture_id` on process requests is an optional same-environment, earlier
+processed capture for debugging. Otherwise association prefers eligible approved track
+state, then latest processed evidence. All chosen references and scores persist in
+tracking JSON. Manual debug baselines cannot silently replace the accepted parent.
+
+Revision diffs return before/after boxes, canonical masks, crop and image URLs on
+image-view events. URLs are freshly signed and expire; their changing signatures do
+not change the underlying immutable event. A diff reference must be an ancestor.
+Historical physical-object payloads remain readable; no view-track mapping is invented.
+
+Highlights default to **committed accepted** events only. Query both source captures
+with the same revision to retrieve before and after movement regions separately.
+Missing events only highlight the last-visible capture, never the empty current view.
+A missing mask is explicit, not a fabricated region. Other-environment revisions fail.
+See [highlight contract and synthetic exports](highlights.md) and
+[matching thresholds/review semantics](matching-and-diffs.md).

@@ -1,129 +1,57 @@
 # Architecture
 
-The Python 3.11 backend is one modular package: API, core configuration/logging,
-domain, application, vision, infrastructure and workers. API imports remain CPU-only
-and do not initialize models or connect to infrastructure. Phase 0 exposes liveness.
+Python 3.11 FastAPI serves immutable four-image captures and reviewable semantic
+history. PostgreSQL owns durable state; Silo/S3 stores immutable originals and
+run-scoped derivatives; Redis/RQ carries versioned JSON job/run IDs. API imports
+initialize no models or infrastructure connections and load no Torch, Ultralytics,
+NumPy, SciPy or reconstruction modules. Models load only inside each spawned worker
+job child, once for its four views. Real assets are local and verified, never fetched.
 
-Later phases use PostgreSQL for durable state, Silo/S3 for immutable originals and
-artifacts, and Redis/RQ for JSON-serialized jobs carrying primitive IDs. Workers
-resolve data server-side. Database status remains authoritative beyond Redis TTLs.
-Vision runs Grounding DINO → SAM 2.1 → DINOv2 outside the API process.
+The active pipeline is YOLOE prompt-free extraction plus the retained DINOv2 adapter.
+Canonical EXIF-corrected RGB copies supply original-pixel boxes/RLE masks; original
+bytes stay unchanged. DINOv2 uses padded masked crops and normalized float32 vectors.
+Missing masks/tiny regions retain explicit unavailable evidence. Per-camera stages
+preserve successful outputs on failure and retain diagnostics. Retries create new
+runs/keys rather than changing prior outputs. Database job/run status is authoritative
+beyond Redis TTL; abrupt worker-host loss without a callback still needs operator
+reconciliation. RQ uses SpawnWorker and JSONSerializer; the parent loads no models.
 
-Reconstruction is an independent Python 3.12 uv project, never a backend dependency
-or shared workspace member. Future backend scheduling uses the string import path
-`reconstruction_worker.worker.run_reconstruction` on a dedicated queue; only the
-reconstruction worker resolves it. PointDiT yields per-view PLY, never fused geometry.
+After extraction succeeds for all views, an environment-row lock serializes camera-local
+association. Hungarian assignment has explicit unmatched options, configurable scoring
+and ambiguity margins. Immutable run snapshots carry chosen references and decisions;
+mutable track registry fields are advisory. No automatic cross-camera physical-object
+links exist. Missing observations retain last-visible evidence for possible reappearance.
 
-Every capture requires exactly cam_01..cam_04, with cam_04 fixed as overhead.
-Original bytes remain immutable. Camera-local temporal tracks come first;
-cross-view candidates preserve ambiguity and require reviewable, reversible links.
-There is no calibration, registration, frontend, OpenUSD or metric movement.
+Proposals describe image-view hypotheses, not physical facts. Review is separate from
+commit. An environment lock serializes linear, idempotent revision commits; accepted
+states copy only selected accepted proposals onto the parent state. Rejected events
+remain queryable and cannot move the approved baseline. Committed proposal payloads,
+revision rows, revision changes and revision snapshots are immutable. Stale baselines
+must be reprocessed before a new commit. Historical physical-object history remains
+readable without inventing view-local mappings.
 
-## Phase 1 boundaries
+Capture ingestion validates exactly cam_01..cam_04, filenames/signatures/MIME, dimensions,
+EXIF, byte/pixel limits and timezone-aware timestamps. cam_04 always means overhead.
+Capture rows transition uploading→ready/failed; ready requires all four frame rows.
+Storage failures may retain orphan immutable blobs; no automatic evidence deletion.
+S3 conditional puts reject overwrites; LocalStore atomically publishes checksum-verified
+metadata/byte envelopes. Derivatives are environment-scoped. Signed S3 URLs expire.
 
-Typed frozen Pydantic contracts cover capture/frame metadata, masks, embedding
-metadata, observations/tracks/objects, association candidates, changes, revisions,
-jobs and artifacts. The `CameraID` enum derives the role; callers cannot turn
-cam_04 into a side view.
+Inspection uses static self-contained HTML and ZIP artifacts. JSON retains candidates,
+chosen matches, canonical transforms, tracks, proposals, source/model hashes and package
+provenance. Reports do not certify model accuracy. Cross-view association remains
+explicitly unimplemented and optional; it does not block per-camera processing.
 
-`ingest_capture` accepts exactly four image uploads, validates filenames, signature,
-MIME, size/pixel limits and timezone-aware timestamps before storing any bytes.
-Pillow verifies and decodes JPEG/PNG/WebP; EXIF orientation affects coordinate-frame
-dimensions only. Original width, height, orientation, timestamps and SHA-256 remain
-available. The returned ready capture includes an ordered source-manifest hash and
-skew warnings. No hardware synchronization or calibration is performed. Phase 2 persists uploading/failed/ready states through CaptureService and the
-transactional repository. A storage failure marks the capture failed and may leave
-immutable orphan blobs, never a returned ready capture. No automatic evidence cleanup is implemented.
+Highlight manifests select committed view events in their actual source image. The
+CPU dense-grid utility performs recorded crop/flip/nearest-resize/pad transforms and
+one shared XYZ/RGB/label validity filter. It records pixel/grid indices and conflicts;
+it cannot recover correspondence from unordered PLY alone.
 
-Both storage adapters require an environment UUID. Original keys follow the plan's
-`originals/{environment_id}/...` layout and reject another environment's prefix.
-Derived keys are scoped beneath `environments/{environment_id}/` to prevent collisions
-and access across environments. LocalStore atomically publishes one envelope holding
-metadata and bytes; it verifies metadata/checksum on reads and rejects overwrites.
-It has no HTTP server and explicitly cannot issue signed URLs. S3Store uses signed
-conditional PutObject (`If-None-Match: *`) via the MinIO SDK's low-level request method;
-idempotent retries require identical bytes and metadata. This avoids a concurrent
-check-then-write race. The Phase 1 integration gate passes against PGSTY Silo, the approved
-S3-compatible replacement for unavailable MinIO container images. S3 presigned GETs expire in 1–3600 seconds; use a public-endpoint client if the
-worker-internal endpoint is not reachable by the downloading client. Storage service
-credentials remain trusted server-side configuration, never client inputs.
+Reconstruction is a separate Python 3.12 uv project, never an API dependency or shared
+workspace member. Future P9 integrates PointDiT at its dense point-map export boundary,
+with independently acquired PointDiT/DINOv3 assets. It will emit per-view PLY and mapping
+sidecars, without calibration, registration or fusion. This refactor provides contracts
+and synthetic point-grid tests only. No frontend/OpenUSD is included.
 
-
-## Phase 2 orchestration
-
-Capture APIs persist complete four-frame captures in PostgreSQL and immutable originals
-in Silo. RQ jobs use JSON serialization with a versioned dictionary carrying job/run
-UUID strings. Queue entries contain no client paths or image bytes. Worker processes
-resolve the capture and config from the database; only the worker executes the stage.
-The CLI launches SpawnWorker with no GPU initialization in its parent. See
-[RQ worker documentation](https://python-rq.org/docs/workers/) for process/serializer behavior.
-
-Logical vision jobs are unique by environment, kind, capture subject and config hash.
-Scheduling locks the capture to serialize concurrent requests. Retry reuses the logical
-job but creates a new run with retained attempt provenance. Redis receives a unique
-job ID per attempt after database commit. Repeated queued requests can redeliver safely;
-worker claims are atomic and stale deliveries cannot claim a newer attempt.
-PostgreSQL status outlives Redis TTLs. Normal exceptions and RQ failure callbacks
-persist failures. Abrupt host loss without callbacks needs future reconciliation.
-
-Phase 2's stage validates the ready capture's four metadata records and completes
-orchestration only. Manifests explicitly state `inference_performed: false`. This is
-not the fake vision pipeline (Phase 3) or real inference (Phase 4). Real-provider
-scheduling is rejected explicitly. Reconstruction scheduling remains deferred.
-
-
-## Phase 3 fixture pipeline and inspection
-
-Worker-local imports load the pipeline, fake adapters and CPU mask/vector libraries;
-API import tests also exclude NumPy and pycocotools. Original bytes are fetched via
-server-side storage metadata and checked against frame SHA-256/MIME, then decoded
-with EXIF orientation into RGB copies. Fixture PNG metadata is strictly validated
-(camera role, bounded object count, unique fixture IDs and in-frame boxes).
-
-Typed DetectionBox, InstanceMask, ObjectEmbedding, PerCameraResult and ProcessingManifest
-contracts preserve run/frame/camera IDs, oriented image size and coordinate convention,
-and trace IDs. Adapters must return identical aligned detection IDs with matching frame
-context. Masks use [COCO compressed RLE](https://github.com/cocodataset/cocoapi/blob/master/common/maskApi.c)
-and JSON-safe counts; decoding validates counts before native pycocotools decoding.
-Vectors are normalized and persisted as little-endian float32 with explicit metadata.
-
-Cameras are processed in canonical order. Successful outputs and artifacts persist
-per camera; camera faults do not stop the remaining views. Each camera gets a result
-JSON, including failure details. Final manifests record original hashes, adapter source
-hashes, CPU package versions, preprocessing/configuration and timing/errors. Artifacts
-are immutable, camera-specific and run-scoped, with corresponding SQL rows. All artifact
-logs and result contracts use the run UUID as their correlation ID.
-
-The static report embeds previews and JSON downloads. A deterministic-path ZIP includes
-stage artifacts plus the report; runtime timings vary intentionally. There is no browser
-application, calibration, association or change processing. Future-stage diagnostic
-placeholders explicitly say they are not implemented. The default `fake-fixture`
-configuration includes `pipeline_version: fake-v1`, so a prior Phase 2 skeleton-only
-success is not silently reused as a Phase 3 result. The old preset name aliases the
-new configuration. Failures retry into new run IDs and preserve old evidence.
-
-
-## Phase 4 real-model boundary
-
-VisionSettings and asset preflight use CPU-only imports. Real scheduling verifies
-local checkpoint hashes, clean pinned source commits/config hashes and BERT directory
-fingerprints, and snapshots absolute paths plus the environment prompt catalogue and
-thresholds. Migration 0003 adds the nullable per-environment prompt catalogue. Workers
-recheck this snapshot and import/load upstream models only after claiming their job.
-No source/weight download is performed by readiness or inference.
-
-The same per-camera orchestrator accepts concrete adapter instances; a real-provider
-run without them fails rather than defaulting to fake adapters. Real images ignore
-synthetic PNG metadata. Grounding DINO retains raw-query/NMS decisions; SAM 2 encodes
-each nonempty frame once and preserves box-to-mask IDs. DINOv2 normalizes 384-dimensional
-CLS outputs from documented padded mask-aware crops. Canonical shape/coordinate/vector
-checks apply before persistence. Actual source/weight hashes, device/runtime/package
-metadata and preprocessing settings persist in manifests. Static reports label real
-and fake providers distinctly; tracking/association/change processing remains deferred.
-
-Torch/TorchVision and support packages are locked only in the optional vision group.
-Official upstream sources use verified operator-managed checkouts at core/model_pins.py
-commits, rather than triggering CUDA-dependent setup in the API's resolver/CPU CI.
-PointDiT/reconstruction remains a separate Python 3.12 project with no dependency changes.
-Model-readiness distinguishes file verification from runtime loading; only an operator
-real four-image smoke exercises actual inference. That smoke has not been run here.
+Original Phase 0–4 architecture remains in Git and implementation-status history;
+[the refactor plan](../CODEX_YOLOE_REFACTOR_PLAN.md) supersedes its vision/tracking path.

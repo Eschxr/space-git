@@ -41,3 +41,13 @@ def test_initial_baseline_and_coarse_change_rules():
     assert event(s) == ["appearance_changed"]
     s["match"]["embedding_missing"] = True
     assert event(s) == ["uncertain"]
+
+
+def test_historical_noncanonical_evidence_remains_readable():
+    from types import SimpleNamespace
+
+    from scene_tracker.api.routes.revisions import visualize
+
+    legacy = {"type": "unobserved", "before_ref": {"position": [1, 2]}, "after_ref": None}
+    services = SimpleNamespace(store_factory=lambda env: None)
+    assert visualize(legacy, services, uuid4()) == legacy

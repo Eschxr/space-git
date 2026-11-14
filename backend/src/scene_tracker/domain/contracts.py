@@ -117,6 +117,8 @@ class PhysicalObject(Contract):
 
 
 class ChangeProposal(Contract):
+    camera_id: CameraID | None = None
+    view_track_id: UUID | None = None
     id: UUID
     run_id: UUID
     object_id: UUID | None = None

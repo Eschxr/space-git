@@ -51,3 +51,11 @@ def test_unmatched_and_distinct_assignment():
     assert len(result["matches"]) == 2
     assert len({c["track_id"] for c in result["matches"]}) == 2
     assert not match("cam_01", [obj("old")], [], settings)["matches"]
+
+
+def test_label_normalization_preserves_raw_glass_and_plural_boxes():
+    from scene_tracker.vision.matching.costs import normalize_label
+
+    assert normalize_label("  BOXES  ") == "box"
+    assert normalize_label("Seats") == "chair"
+    assert normalize_label("glass") == "glass"

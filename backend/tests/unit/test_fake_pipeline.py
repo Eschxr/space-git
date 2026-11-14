@@ -14,6 +14,7 @@ from scene_tracker.domain.contracts import Mask
 from scene_tracker.domain.enums import CameraID
 from scene_tracker.infrastructure.storage.local import LocalStore
 from scene_tracker.vision.contracts import PerCameraResult
+from scene_tracker.vision.detection.extractor_fake import FakeExtractor
 from scene_tracker.vision.detection.fake import FakeDetector
 from scene_tracker.vision.fixtures import METADATA_KEY, generate_capture, synthetic_image
 from scene_tracker.vision.masks import decode_mask, encode_mask
@@ -132,7 +133,9 @@ def test_camera_fault_and_retry_preserve_old_artifacts(tmp_path):
             return super().detect(image, prompts, config)
 
     with pytest.raises(PipelineFailed, match="cam_02"):
-        process_fake(repository, run, capture, store, detector=FaultyDetector())
+        process_fake(
+            repository, run, capture, store, extractor=FakeExtractor(detector=FaultyDetector())
+        )
     assert [r["status"] for r in repository.manifests[run["id"]]["cameras"]] == [
         "succeeded",
         "failed",
@@ -174,7 +177,9 @@ def test_rejects_adapter_alignment_and_records_diagnostics(tmp_path):
             return list(reversed(super().segment(image, boxes, config)))
 
     with pytest.raises(PipelineFailed, match="alignment mismatch"):
-        process_fake(repository, run, capture, store, segmenter=Misaligned())
+        process_fake(
+            repository, run, capture, store, extractor=FakeExtractor(segmenter=Misaligned())
+        )
     assert all(c["status"] == "failed" for c in repository.manifests[run["id"]]["cameras"])
     assert not repository.detections
     assert any(a.kind == "report" for a in repository.artifacts)

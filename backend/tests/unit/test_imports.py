@@ -11,7 +11,7 @@ def test_cpu_only_imports():
                 "import sys; import scene_tracker; import scene_tracker.api.main; "
                 "assert not any(k.split('.')[0] in "
                 "{'torch', 'sam2', 'dinov2', 'groundingdino', 'reconstruction_worker', "
-                "'pointdit', 'numpy', 'pycocotools'} "
+                "'pointdit', 'numpy', 'pycocotools', 'ultralytics', 'scipy'} "
                 "for k in sys.modules)"
             ),
         ],

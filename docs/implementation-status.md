@@ -85,3 +85,10 @@
 - Next checkpoint: **R1 — YOLOE prompt-free extractor. Stopped at R0 for review; R1 not started.**
 
 - R0 staging note: the full staged `git diff --cached --check` reported three pre-existing Markdown hard-break trailing-space lines (3–5) in the supplied refactor plan. They were preserved verbatim. Whitespace checks on R0-authored instruction/audit/status changes pass; this is not a test or lint failure.
+
+## R1 — YOLOE prompt-free extractor — completed
+- User authorized R1–R6 in one run, superseding review pauses; checkpoint gates remain sequential.
+- Added ObjectExtractor, local YOLOE prompt-free adapter, combined fake extraction and worker-only YOLOE+DINOv2 initialization. New preflight requires only local `yoloe-11s-seg-pf.pt`/hash and existing pinned DINOv2 assets. No set_classes call or old text encoder prerequisite. Legacy runtime/settings temporarily archived for offline historical tests.
+- Pinned Ultralytics 8.4.0 and resolved with existing Torch 2.7.1/TorchVision 0.22.1; CPU sync installed no ML framework or weights. This is resolver/stub compatibility, not real runtime/quality validation; real smoke remains unavailable without operator assets.
+- Checks: 76 offline tests, Ruff pass; existing service suite passed (13 tests). Stub conversion covers two masks/labels, empty results, explicit missing masks, canonical dimensions and prohibition on set_classes; default four-image fake pipeline/API retained. Real weights not downloaded.
+- Next: R2, continuing under the user's explicit full-refactor authorization.

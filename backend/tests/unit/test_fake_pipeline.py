@@ -105,7 +105,7 @@ def test_fake_contracts_masks_vectors_and_debug_bundle(tmp_path, empty):
         ):
             assert box.id == mask.detection_id == embedding.detection_id
             array = decode_mask(mask.rle)
-            x1, y1, x2, y2 = box.box_xyxy
+            x1, y1, x2, y2 = map(int, box.box_xyxy)
             assert int(array.sum()) == (x2 - x1) * (y2 - y1)
             assert array[y1:y2, x1:x2].all()
             assert embedding.dimension == 8

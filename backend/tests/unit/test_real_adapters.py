@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from scene_tracker.core.vision_settings import VisionSettings
+from scene_tracker.core.legacy_vision_settings import VisionSettings
 from scene_tracker.vision.contracts import DetectionBox, FrameContext
 from scene_tracker.vision.detection.grounding_dino import GroundingDINO
 from scene_tracker.vision.embeddings.dinov2 import DINOv2Embedder, prepare_crop

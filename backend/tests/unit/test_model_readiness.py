@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from scene_tracker.core.legacy_vision_settings import VisionSettings
 from scene_tracker.core.model_pins import PINS
-from scene_tracker.core.vision_settings import VisionSettings
-from scene_tracker.vision.readiness import (
+from scene_tracker.vision.legacy.readiness import (
     ModelUnavailable,
     directory_hash,
     preflight,
@@ -74,7 +74,7 @@ def test_cli_missing_weights_is_actionable_and_offline(tmp_path, command):
             sys.executable,
             "-c",
             (
-                "import os; os.environ['VISION_GROUNDING_CHECKPOINT']='/missing/model.pth'; "
+                "import os; os.environ['YOLOE_CHECKPOINT']='/missing/model.pth'; "
                 "from scene_tracker.cli import main; main()"
             ),
             command,
@@ -101,7 +101,11 @@ def test_real_pipeline_cannot_use_fake_defaults(tmp_path):
     with pytest.raises(RuntimeError, match="fake fallback is forbidden"):
         process_pipeline(None, {"model_manifest": {"config": {"provider": "real"}}}, None, None)
     with pytest.raises(ModelUnavailable):
-        load_models(VisionSettings(_env_file=None, grounding_checkpoint=None))
+        load_models(
+            __import__(
+                "scene_tracker.core.vision_settings", fromlist=["VisionSettings"]
+            ).VisionSettings(_env_file=None, yoloe_checkpoint=None)
+        )
 
 
 def test_settings_snapshot_preserves_model_cache_and_rejects_bad_prompts(tmp_path):

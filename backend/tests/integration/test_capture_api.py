@@ -331,7 +331,7 @@ def test_environment_prompt_catalogue_and_missing_models_before_enqueue(api):
     )
     result = capture(api)
     api.services.settings.vision_provider = "real"
-    api.services.settings.vision.grounding_checkpoint = None
+    api.services.settings.vision.yoloe_checkpoint = None
     response = api.client.post(
         f"/api/v1/captures/{result['id']}/process", json={"preset": "default"}
     )

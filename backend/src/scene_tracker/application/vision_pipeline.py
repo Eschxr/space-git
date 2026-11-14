@@ -19,6 +19,7 @@ from scene_tracker.vision.contracts import (
 )
 from scene_tracker.vision.debug.overlays import overlays, png
 from scene_tracker.vision.debug.report import bundle, report
+from scene_tracker.vision.detection.extractor_fake import FakeExtractor
 from scene_tracker.vision.detection.fake import FakeDetector
 from scene_tracker.vision.embeddings.fake import FakeEmbedder
 from scene_tracker.vision.masks import decode_mask
@@ -100,9 +101,12 @@ def process_pipeline(
     segmenter=None,
     embedder=None,
     model_provenance=None,
+    extractor=None,
 ):
     provider = run["model_manifest"]["config"]["provider"]
-    if provider == "real" and (detector is None or segmenter is None or embedder is None):
+    if provider == "real" and (
+        embedder is None or (extractor is None and (detector is None or segmenter is None))
+    ):
         raise PipelineFailed("real provider requires concrete adapters; fake fallback is forbidden")
     if provider not in {"fake", "real"}:
         raise PipelineFailed("unsupported vision provider")
@@ -112,6 +116,18 @@ def process_pipeline(
         segmenter or FakeSegmenter(),
         embedder or FakeEmbedder(),
     )
+    if extractor is None and provider == "real":
+
+        class InjectedPair:
+            def extract(self, rgb, config):
+                boxes = detector.detect(
+                    rgb, run["model_manifest"]["config"].get("prompts", []), config
+                )
+                self.last_candidates = getattr(detector, "last_candidates", [])
+                return boxes, segmenter.segment(rgb, boxes, config)
+
+        extractor = InjectedPair()
+    extractor = extractor or FakeExtractor(detector, segmenter)
     start = time.perf_counter()
     writer = ArtifactWriter(repository, store, run["id"], capture["environment_id"])
     results, errors, timings = [], [], {}
@@ -130,24 +146,18 @@ def process_pipeline(
             rgb, scenario, warnings = load_frame(store, frame, parse_fixture=provider == "fake")
             config = (context, scenario)
             stage_start = time.perf_counter()
-            prompts = (
-                [o.label for o in scenario.objects]
-                if provider == "fake"
-                else run["model_manifest"]["config"]["prompts"]
-            )
-            boxes = detector.detect(rgb, prompts, config)
+            boxes, masks = extractor.extract(rgb, config)
             detector_called = True
-            if hasattr(detector, "last_candidates"):
+            if hasattr(extractor, "last_candidates"):
                 writer.json(
-                    f"debug/{context.camera_id}/detector_candidates.json",
-                    detector.last_candidates,
-                    "detector_candidates",
+                    f"debug/{context.camera_id}/extractor.json",
+                    extractor.last_candidates,
+                    "detector_candidates"
+                    if detector is not None and provider == "real"
+                    else "extractor_diagnostics",
                     context.camera_id,
                 )
-            timings[f"{context.camera_id}/detect"] = time.perf_counter() - stage_start
-            stage_start = time.perf_counter()
-            masks = segmenter.segment(rgb, boxes, config)
-            timings[f"{context.camera_id}/segment"] = time.perf_counter() - stage_start
+            timings[f"{context.camera_id}/extract"] = time.perf_counter() - stage_start
             stage_start = time.perf_counter()
             embeddings = embedder.embed(rgb, masks, boxes, config)
             timings[f"{context.camera_id}/embed"] = time.perf_counter() - stage_start
@@ -285,7 +295,7 @@ def process_pipeline(
                     Path(sys.modules[type(a).__module__].__file__).read_bytes()
                 ).hexdigest(),
             }
-            for a in (detector, segmenter, embedder)
+            for a in (extractor, embedder)
         },
         "checkpoints": {},
         "device": "cpu",

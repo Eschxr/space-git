@@ -53,7 +53,7 @@ def run_smoke(input_dir, output, settings):
         uploads.append(
             ImageUpload(CameraID(path.stem), path.name, mimes[path.suffix.lower()], data)
         )
-    detector, segmenter, embedder, provenance = load_models(settings.vision)
+    extractor, embedder, provenance = load_models(settings.vision)
     output.mkdir(parents=True, exist_ok=False)
     environment_id, run_id = uuid4(), uuid4()
     store = LocalStore(output / "objects", environment_id)
@@ -69,7 +69,7 @@ def run_smoke(input_dir, output, settings):
         "provider": "real",
         "pipeline_version": "real-v1",
         "preset": "default",
-        "prompts": list(settings.vision.prompts),
+        "extractor": "yoloe",
         "assets": assets,
         "vision": settings.vision.model_dump(mode="json"),
     }
@@ -86,8 +86,7 @@ def run_smoke(input_dir, output, settings):
             run,
             capture.model_dump(),
             store,
-            detector=detector,
-            segmenter=segmenter,
+            extractor=extractor,
             embedder=embedder,
             model_provenance=provenance,
         )

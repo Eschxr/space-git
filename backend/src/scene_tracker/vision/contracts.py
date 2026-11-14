@@ -27,7 +27,7 @@ class DetectionBox(FrameContext):
     fixture_id: str
     label: str
     score: Score
-    box_xyxy: tuple[int, int, int, int]
+    box_xyxy: tuple[float, float, float, float]
 
     @model_validator(mode="after")
     def bounds(self):
@@ -119,3 +119,7 @@ class Segmenter(Protocol):
 
 class Embedder(Protocol):
     def embed(self, rgb_image, instance_masks, boxes, config) -> list[ObjectEmbedding]: ...
+
+
+class ObjectExtractor(Protocol):
+    def extract(self, rgb_image, config) -> tuple[list[DetectionBox], list[InstanceMask]]: ...

@@ -35,14 +35,13 @@ def execute_vision(repository, job_id, run_id, stage=None, store_factory=None):
                 settings = VisionSettings.model_validate(config["vision"])
                 if preflight(settings) != config["assets"]:
                     raise ModelUnavailable("model assets changed after enqueue")
-                detector, segmenter, embedder, provenance = load_models(settings)
+                extractor, embedder, provenance = load_models(settings)
                 process_pipeline(
                     repository,
                     run,
                     capture,
                     store,
-                    detector=detector,
-                    segmenter=segmenter,
+                    extractor=extractor,
                     embedder=embedder,
                     model_provenance=provenance,
                 )

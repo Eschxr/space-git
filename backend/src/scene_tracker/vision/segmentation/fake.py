@@ -10,7 +10,7 @@ class FakeSegmenter:
         result = []
         for box in boxes:
             mask = np.zeros((context.height, context.width), dtype=np.uint8)
-            x1, y1, x2, y2 = box.box_xyxy
+            x1, y1, x2, y2 = map(int, box.box_xyxy)
             mask[y1:y2, x1:x2] = 1
             result.append(
                 InstanceMask(

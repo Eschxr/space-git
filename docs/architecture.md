@@ -70,3 +70,34 @@ Phase 2's stage validates the ready capture's four metadata records and complete
 orchestration only. Manifests explicitly state `inference_performed: false`. This is
 not the fake vision pipeline (Phase 3) or real inference (Phase 4). Real-provider
 scheduling is rejected explicitly. Reconstruction scheduling remains deferred.
+
+
+## Phase 3 fixture pipeline and inspection
+
+Worker-local imports load the pipeline, fake adapters and CPU mask/vector libraries;
+API import tests also exclude NumPy and pycocotools. Original bytes are fetched via
+server-side storage metadata and checked against frame SHA-256/MIME, then decoded
+with EXIF orientation into RGB copies. Fixture PNG metadata is strictly validated
+(camera role, bounded object count, unique fixture IDs and in-frame boxes).
+
+Typed DetectionBox, InstanceMask, ObjectEmbedding, PerCameraResult and ProcessingManifest
+contracts preserve run/frame/camera IDs, oriented image size and coordinate convention,
+and trace IDs. Adapters must return identical aligned detection IDs with matching frame
+context. Masks use [COCO compressed RLE](https://github.com/cocodataset/cocoapi/blob/master/common/maskApi.c)
+and JSON-safe counts; decoding validates counts before native pycocotools decoding.
+Vectors are normalized and persisted as little-endian float32 with explicit metadata.
+
+Cameras are processed in canonical order. Successful outputs and artifacts persist
+per camera; camera faults do not stop the remaining views. Each camera gets a result
+JSON, including failure details. Final manifests record original hashes, adapter source
+hashes, CPU package versions, preprocessing/configuration and timing/errors. Artifacts
+are immutable, camera-specific and run-scoped, with corresponding SQL rows. All artifact
+logs and result contracts use the run UUID as their correlation ID.
+
+The static report embeds previews and JSON downloads. A deterministic-path ZIP includes
+stage artifacts plus the report; runtime timings vary intentionally. There is no browser
+application, calibration, association or change processing. Future-stage diagnostic
+placeholders explicitly say they are not implemented. The default `fake-fixture`
+configuration includes `pipeline_version: fake-v1`, so a prior Phase 2 skeleton-only
+success is not silently reused as a Phase 3 result. The old preset name aliases the
+new configuration. Failures retry into new run IDs and preserve old evidence.

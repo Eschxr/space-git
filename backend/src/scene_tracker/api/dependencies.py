@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Request
-from minio import Minio
 from sqlalchemy import create_engine
 
 from scene_tracker.core.settings import Settings
@@ -11,7 +10,7 @@ from scene_tracker.infrastructure.db.repositories import Repository
 from scene_tracker.infrastructure.queue.base import JobDispatcher
 from scene_tracker.infrastructure.queue.rq import RQDispatcher
 from scene_tracker.infrastructure.storage.base import ArtifactStore
-from scene_tracker.infrastructure.storage.s3 import S3Store
+from scene_tracker.infrastructure.storage.factory import s3_store_factory
 
 
 @dataclass
@@ -34,21 +33,9 @@ def _get_or_create_services(request):
     # Engine creation is lazy and does not connect until an application query.
     engine = create_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
     request.app.state.engine = engine
-    client = Minio(
-        settings.s3_endpoint,
-        access_key=settings.s3_access_key.get_secret_value(),
-        secret_key=settings.s3_secret_key.get_secret_value(),
-        secure=settings.s3_secure,
-    )
-    public = Minio(
-        settings.public_objectstore_endpoint,
-        access_key=settings.s3_access_key.get_secret_value(),
-        secret_key=settings.s3_secret_key.get_secret_value(),
-        secure=settings.s3_secure,
-    )
     services = Services(
         Repository(engine),
-        lambda env: S3Store(client, settings.s3_bucket, env, public),
+        s3_store_factory(settings),
         RQDispatcher(settings.redis_url),
         settings,
     )

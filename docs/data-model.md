@@ -34,3 +34,10 @@ and the current run ID/attempt on durable jobs. Existing `0001` DDL is unchanged
 Failed runs remain independently queryable after retries, with their logical job ID
 and attempt recorded in the run manifest. Schema tests cover full upgrade/downgrade
 and re-upgrade through the current head using isolated PostgreSQL schemas.
+
+
+Phase 3 uses the existing `detections` and `artifacts` tables without a new migration.
+A detection stores mask/crop/embedding keys and explicit embedding dimension, dtype,
+byte order, model and hash metadata. All blob contents remain in immutable object
+storage. Processing manifests retain per-camera contracts, input hashes, fake adapter
+source hashes, preprocessing, package versions, timing and error provenance.

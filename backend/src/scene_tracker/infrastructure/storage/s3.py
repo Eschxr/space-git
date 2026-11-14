@@ -48,6 +48,12 @@ class S3Store:
             self.get(blob)  # Idempotent only if content AND metadata agree.
         return blob
 
+    def stat(self, key: str) -> Blob:
+        result = self.client.stat_object(self.bucket, scoped_key(self.environment_id, key))
+        return Blob(
+            key, result.metadata.get("x-amz-meta-sha256", ""), result.content_type, result.size
+        )
+
     def get(self, blob: Blob) -> bytes:
         validate(blob.key, blob.content_type)
         key = scoped_key(self.environment_id, blob.key)

@@ -7,15 +7,20 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
+from minio import Minio
 from rq.job import Job
 from rq.serializers import JSONSerializer
 from sqlalchemy import update
 
 from scene_tracker.application.process import ProcessingService
 from scene_tracker.core.settings import Settings
+from scene_tracker.domain.enums import CameraID
 from scene_tracker.infrastructure.db.models import captures, environments, frames
 from scene_tracker.infrastructure.db.repositories import Repository
 from scene_tracker.infrastructure.queue.rq import RQDispatcher
+from scene_tracker.infrastructure.storage.base import checksum
+from scene_tracker.infrastructure.storage.s3 import S3Store
+from scene_tracker.vision.fixtures import synthetic_image
 
 pytestmark = pytest.mark.integration
 
@@ -29,8 +34,20 @@ def test_spawnworker_json_failure_retry_and_durable_status(database, monkeypatch
     monkeypatch.setenv("REDIS_URL", redis_url)
     queue_name = "test-vision-" + uuid4().hex
     dispatcher = RQDispatcher(redis_url, queue_name)
+    bucket = "test-" + uuid4().hex
+    client = Minio(
+        os.environ["TEST_S3_ENDPOINT"],
+        access_key=os.environ["TEST_S3_ACCESS_KEY"],
+        secret_key=os.environ["TEST_S3_SECRET_KEY"],
+        secure=False,
+    )
+    client.make_bucket(bucket)
+    for setting in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"):
+        monkeypatch.setenv(setting, os.environ["TEST_" + setting])
+    monkeypatch.setenv("S3_BUCKET", bucket)
     repository = Repository(engine)
     env, capture_id = uuid4(), uuid4()
+    store = S3Store(client, bucket, env)
     with engine.begin() as conn:
         conn.execute(environments.insert().values(id=env, name="worker test"))
         conn.execute(
@@ -39,17 +56,21 @@ def test_spawnworker_json_failure_retry_and_durable_status(database, monkeypatch
             )
         )
         for i in range(1, 5):
+            camera = CameraID(f"cam_{i:02}")
+            raw = synthetic_image(camera)
+            key = f"originals/{env}/{capture_id}/{camera}/{checksum(raw)}.png"
+            store.put(key, raw, "image/png")
             conn.execute(
                 frames.insert().values(
                     environment_id=env,
                     capture_id=capture_id,
                     camera_id=f"cam_{i:02}",
-                    storage_key=f"test/{i}",
-                    sha256="0" * 64,
-                    width=1,
-                    height=1,
-                    original_width=1,
-                    original_height=1,
+                    storage_key=key,
+                    sha256=checksum(raw),
+                    width=320,
+                    height=240,
+                    original_width=320,
+                    original_height=240,
                     exif_orientation=1,
                     content_type="image/png",
                 )
@@ -110,3 +131,6 @@ def test_spawnworker_json_failure_retry_and_durable_status(database, monkeypatch
     finally:
         dispatcher.queue.delete(delete_jobs=True)
         dispatcher.connection.close()
+        for obj in client.list_objects(bucket, recursive=True):
+            client.remove_object(bucket, obj.object_name)
+        client.remove_bucket(bucket)

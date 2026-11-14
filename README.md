@@ -5,9 +5,9 @@ Scene Tracker builds a reviewable semantic history from four fixed-role images:
 Original images remain immutable evidence. Same-camera tracking precedes reviewable
 cross-view associations; ambiguous identities remain unresolved for human review.
 
-Phase 2 adds capture upload/list/retrieval APIs and durable Redis/RQ orchestration.
-PostgreSQL, Silo and Redis integration tests pass. The worker currently validates
-orchestration only; vision inference, review and reconstruction remain later phases.
+Phase 3 adds a deterministic synthetic fixture pipeline with stored boxes, compressed
+masks, float32 vectors and inspection bundles. PostgreSQL, Silo and Redis integration
+tests pass. Pretrained inference, tracking, review and reconstruction remain later phases.
 See [the plan](CODEX_IMPLEMENTATION_PLAN.md) and [implementation status](docs/implementation-status.md).
 
 ## Development
@@ -48,31 +48,33 @@ uv run pytest
 uv run reconstruction-worker --help
 ```
 
-Start the vision orchestration worker in a separate terminal from `backend/`:
+Start the fake vision worker in a separate terminal from `backend/`:
 
 ```bash
-uv run --env-file ../.env --no-group vision scene-tracker worker vision
+uv run --env-file ../.env --group vision scene-tracker worker vision
 # Process queued work and exit:
-uv run --env-file ../.env --no-group vision scene-tracker worker vision --burst
+uv run --env-file ../.env --group vision scene-tracker worker vision --burst
 ```
 
 The worker uses RQ SpawnWorker and JSON serialization, never initializes GPU models
-in its parent, and reads IDs/configuration from PostgreSQL. Phase 2 supports the
-`skeleton` preset with `VISION_PROVIDER=fake`: success means orchestration completed,
-with manifest `inference_performed: false`. Real mode returns `model_unavailable`;
+in its parent, and reads IDs/configuration from PostgreSQL. Phase 3 supports the
+`fake-fixture` preset (`skeleton` is an alias) with `VISION_PROVIDER=fake`. It uses
+explicit fixture metadata, with manifest `inference_performed: false` and
+`scope: synthetic_fixture_pipeline`. Real mode returns `model_unavailable`;
 no fake inference is substituted. Reconstruction CLI execution remains a placeholder
 until Phase 9. See [API examples and retry behavior](docs/api.md).
 
 Pretrained weights and official model dependencies are separate operator setup;
-ordinary tests never fetch weights. The `vision` group is currently empty pending
-Phase 4. No real inference or model-quality validation has occurred.
+ordinary tests never fetch weights. The `vision` group currently contains CPU NumPy
+and pycocotools only; the dev group also includes them for offline tests. Real ML
+dependencies remain Phase 4 work. No real inference or model-quality validation has occurred.
 
 There is no frontend, camera control/calibration, registration, OpenUSD or 3D fusion.
 Movement uses pixels or normalized image coordinates. Future PointDiT outputs are
 per-camera PLY, with no claim of world-space alignment. The eventual service assumes
 a single local operator; authentication is deferred and public deployment unsupported.
 
-## Phase 1 schema and storage tests
+## Backend and service tests
 
 The domain schemas, migration, immutable storage adapters and ingestion helper are
 implemented. Phase 2 adds HTTP ingestion and durable job orchestration.
@@ -123,9 +125,42 @@ variables supplied by Compose. The existing `minio_data` named volume is retaine
 for continuity. No existing data was migrated or deleted. Silo is AGPL-3.0-or-later;
 its release source, license and notices are linked in the storage decision.
 
-Phase 2 tests pass, and PostgreSQL, Silo and Redis are left running. Stop them without
+Phase 3 tests pass, and PostgreSQL, Silo and Redis are left running. Stop them without
 deleting data using:
 
 ```bash
 docker compose --env-file .env.example -f infra/compose.yaml stop postgres silo redis
 ```
+
+
+## Synthetic inspection workflow
+
+Generate four labeled PNG fixtures from `backend/` (the output directory must not
+already contain the images):
+
+```bash
+uv run --no-group vision scene-tracker synthetic-capture --output ../local-data/capture-a
+uv run --no-group vision scene-tracker synthetic-capture --output ../local-data/capture-b --moved
+# A no-object fixture is also supported with --empty.
+```
+
+Each PNG contains validated `scene_tracker_fixture` metadata. The fake detector
+reads those boxes, the fake segmenter makes rectangle masks, and the fake embedder
+normalizes deterministic seed hashes into eight-dimensional vectors. Image pixels
+do not drive ML detection. Images without fixture metadata produce zero detections
+with a warning, rather than invented scene results.
+
+Use the [API examples](docs/api.md) to upload `cam_01.png` through `cam_04.png`,
+POST `/captures/{id}/process` with `{"preset":"fake-fixture"}`, and start the worker.
+GET `/processing-runs/{id}/detections` returns per-frame detections;
+GET `/processing-runs/{id}/debug` returns the manifest and short-lived artifact URLs.
+Download `kind: report` for a standalone HTML report or `kind: inspection_bundle`
+for a ZIP containing all stored derivatives, overlays, crop sheets and JSON diagnostics.
+The static report prominently identifies cam_04 as overhead. Tracking/association/change
+JSON files explicitly state `implemented: false` until their planned phases.
+
+To export a reviewable smoke result while running the service test suite, set
+`SCENE_TRACKER_SMOKE_OUTPUT=/tmp/scene-tracker-phase3-smoke` alongside the TEST_* variables
+above before running `uv run --no-group vision pytest -m integration`. The export holds
+`summary.html`, `inspection.zip` and `run.json`. Temporary service schemas/buckets are
+still cleaned by tests. These fake tests verify code contracts, not pretrained model quality.

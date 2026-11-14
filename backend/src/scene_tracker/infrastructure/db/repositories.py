@@ -7,7 +7,9 @@ from sqlalchemy import insert, select, update
 
 from scene_tracker.core.errors import AppError
 from scene_tracker.infrastructure.db.models import (
+    artifacts,
     captures,
+    detections,
     environments,
     frames,
     jobs,
@@ -147,7 +149,7 @@ class Repository:
                     config_hash=config_hash,
                     model_manifest={
                         "config": config,
-                        "scope": "orchestration_only",
+                        "scope": "synthetic_fixture_pipeline",
                         "job_id": str(job_id),
                         "attempt": attempt,
                         "inference_performed": False,
@@ -238,3 +240,60 @@ class Repository:
                     progress={"stage": status},
                 )
             )
+
+    def add_artifact(self, environment_id, run_id, ref):
+        with self.engine.begin() as conn:
+            conn.execute(
+                insert(artifacts).values(
+                    id=ref.id,
+                    environment_id=environment_id,
+                    source_id=run_id,
+                    kind=ref.kind,
+                    camera_id=ref.camera_id,
+                    storage_key=ref.key,
+                    sha256=ref.sha256,
+                    content_type=ref.content_type,
+                )
+            )
+
+    def add_detections(self, records):
+        if records:
+            with self.engine.begin() as conn:
+                conn.execute(insert(detections), records)
+
+    def save_manifest(self, run_id, manifest):
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(processing_runs)
+                .where(processing_runs.c.id == run_id, processing_runs.c.status == "running")
+                .values(model_manifest=manifest)
+            )
+
+    def list_detections(self, run_id, camera_id=None, limit=50, offset=0):
+        self.run(run_id)
+        query = (
+            select(detections, frames.c.camera_id)
+            .join(frames, detections.c.frame_id == frames.c.id)
+            .where(detections.c.run_id == run_id)
+        )
+        if camera_id is not None:
+            query = query.where(frames.c.camera_id == camera_id)
+        with self.engine.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    query.order_by(frames.c.camera_id, detections.c.id).limit(limit).offset(offset)
+                ).mappings()
+            ]
+
+    def list_artifacts(self, run_id):
+        self.run(run_id)
+        with self.engine.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    select(artifacts)
+                    .where(artifacts.c.source_id == run_id)
+                    .order_by(artifacts.c.storage_key)
+                ).mappings()
+            ]

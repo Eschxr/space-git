@@ -10,12 +10,16 @@ class ProcessingService:
         self.dispatcher = dispatcher
         self.settings = settings
 
-    def schedule(self, capture_id, preset="skeleton", retry=False):
+    def schedule(self, capture_id, preset="fake-fixture", retry=False):
         if self.settings.vision_provider == "real":
             raise AppError(
                 "model_unavailable", "Real adapters are not available until Phase 4", 503
             )
-        config = {"preset": preset, "provider": self.settings.vision_provider}
+        config = {
+            "preset": "fake-fixture" if preset == "skeleton" else preset,
+            "provider": self.settings.vision_provider,
+            "pipeline_version": "fake-v1",
+        }
         digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
         job = self.repository.prepare_job(capture_id, config, digest, retry)
         if job["status"] == "queued":

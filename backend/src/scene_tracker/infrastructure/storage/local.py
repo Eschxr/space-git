@@ -47,6 +47,13 @@ class LocalStore:
             temp.unlink(missing_ok=True)
         return blob
 
+    def stat(self, key: str) -> Blob:
+        with self._path(key).open("rb") as stream:
+            blob = Blob(**json.loads(stream.readline()))
+        if blob.key != key:
+            raise StorageError("blob key mismatch")
+        return blob
+
     def get(self, blob: Blob) -> bytes:
         validate(blob.key, blob.content_type)
         with self._path(blob.key).open("rb") as stream:

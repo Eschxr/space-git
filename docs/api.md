@@ -1,4 +1,4 @@
-# API (Phase 2)
+# API (Phase 3)
 
 OpenAPI is available at `/openapi.json` and interactive documentation at `/docs`.
 The service assumes one local operator without authentication. Bind to loopback.
@@ -10,7 +10,7 @@ The service assumes one local operator without authentication. Bind to loopback.
 | POST | `/api/v1/environments/{id}/captures` | Four-file multipart ingestion; returns 201 |
 | GET | `/api/v1/environments/{id}/captures` | Capture summaries, `limit` (1–100, default 50) and `offset` (default 0) |
 | GET | `/api/v1/captures/{id}` | Capture status, timestamps, warnings/errors and frames |
-| POST | `/api/v1/captures/{id}/process` | JSON `{ "preset": "skeleton", "retry": false }`; returns 202 with run and job |
+| POST | `/api/v1/captures/{id}/process` | JSON `{ "preset": "fake-fixture", "retry": false }`; returns 202 with run and job |
 | GET | `/api/v1/processing-runs/{id}` | Durable status, progress, manifest, timing and errors |
 
 ## Capture uploads
@@ -51,18 +51,22 @@ coordinates alongside original dimensions/orientation.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/process \
-  -H 'Content-Type: application/json' -d '{"preset":"skeleton"}'
+  -H 'Content-Type: application/json' -d '{"preset":"fake-fixture"}'
 curl http://127.0.0.1:8000/api/v1/processing-runs/RUN_ID
 # After a failed run:
 curl -X POST http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/process \
-  -H 'Content-Type: application/json' -d '{"preset":"skeleton","retry":true}'
+  -H 'Content-Type: application/json' -d '{"preset":"fake-fixture","retry":true}'
 ```
 
-Phase 2 supports `skeleton` with `VISION_PROVIDER=fake` only. It verifies orchestration
-and four-frame metadata, then completes with manifest `scope: "orchestration_only"`
-and `inference_performed: false`. There are no detections, masks or embeddings yet;
-Phase 3 implements the fake pipeline and Phase 4 real adapters. `VISION_PROVIDER=real`
-returns explicit `model_unavailable` without fake fallback.
+Phase 3 defaults to `fake-fixture` with `VISION_PROVIDER=fake`; `skeleton` is a
+compatibility alias. Both resolve to the same versioned pipeline configuration hash.
+A successful run stores fixture-derived detections, COCO compressed RLE masks,
+normalized fake float32 embeddings and debug artifacts. Its manifest states
+`scope: "synthetic_fixture_pipeline"` and `inference_performed: false`. These are
+synthetic contract outputs, with no trained models executed. PNG fixture metadata
+controls boxes/appearance seeds; images without it produce zero detections and a
+warning. Real-provider requests return explicit `model_unavailable` without fallback.
+Generate fixtures with `scene-tracker synthetic-capture --output DIR`.
 
 Processing is idempotent by `(kind, capture, config hash)` with a database uniqueness
 constraint and per-capture scheduling lock. Identical requests reuse one logical job
@@ -84,3 +88,34 @@ capture/job/run IDs. Codes include `invalid_capture`, `not_found`, `storage_unav
 `queue_unavailable`, `model_unavailable`, `upload_too_large`. FastAPI payload/schema
 validation retains its standard 422 `detail` response. Responses include an
 `X-Correlation-ID` request trace header; run/job IDs provide worker traceability.
+
+
+## Detections and inspection bundles
+
+- `GET /api/v1/processing-runs/{id}/detections` returns a typed detection page, with
+  optional `camera_id=cam_01..cam_04`, `limit` (1–100) and `offset`. Each row preserves
+  run/frame/camera IDs, oriented pixel boxes, mask/crop keys and embedding metadata.
+  Binary embeddings are little-endian float32 blobs with explicit dimension/model/hash.
+- `GET /api/v1/processing-runs/{id}/debug` returns the stored manifest and typed artifact
+  rows with short-lived signed GET URLs. Artifacts carry camera IDs, source run IDs,
+  SHA-256 and a run correlation ID. Includes masks, embeddings, crops, per-camera
+  boxes/mask overlays, crop sheets, JSON results, manifest, standalone report and ZIP.
+
+The report embeds its images and downloadable JSON evidence so a single downloaded
+HTML file works offline and through a private signed URL. It is a static inspection
+artifact, not a frontend application. The ZIP includes all run derivatives except
+itself. The root manifest indexes stage artifacts; the debug API lists the final
+manifest/report/bundle artifacts as well, avoiding self-referential checksums.
+Runtime timing values vary; fixture geometry, masks, vectors, ordering and colors
+are deterministic for the same input/context. Each new run has separate IDs and keys.
+
+Per-camera adapter errors produce an explicit failed camera result and manifest entry.
+Other cameras still run, and successful camera outputs remain queryable. The run/job
+is marked failed after writing available inspection diagnostics. An explicit retry
+uses a new run and never overwrites the old output or originals. A global storage
+outage can prevent saving the report itself; the database still records job failure.
+
+`temporal_matches.json`, `cross_view_candidates.json` and `change_proposals.json`
+are placeholders with `implemented: false`, planned phase numbers and empty item
+lists. They do not claim matching or change detection has run. No object identities
+are invented; overlays show view tracks as unassigned and physical objects as unlinked.

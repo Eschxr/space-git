@@ -9,7 +9,7 @@ from scene_tracker.infrastructure.db.repositories import Repository
 logger = logging.getLogger(__name__)
 
 
-def execute_vision(repository, job_id, run_id, stage=None):
+def execute_vision(repository, job_id, run_id, stage=None, store_factory=None):
     if not repository.claim(job_id, run_id):
         return
     try:
@@ -21,11 +21,15 @@ def execute_vision(repository, job_id, run_id, stage=None):
             raise ValueError("invalid_capture")
         if stage is not None:
             stage(run, capture)
-        # Phase 2 exercises orchestration only. Phase 3 supplies the fake pipeline.
-        repository.progress(run_id, {"stage": "orchestration_only", "frames": 4})
+        else:
+            from scene_tracker.application.vision_pipeline import process_fake
+            from scene_tracker.infrastructure.storage.factory import s3_store_factory
+
+            factory = store_factory or s3_store_factory(Settings())
+            process_fake(repository, run, capture, factory(capture["environment_id"]))
         repository.finish_job(job_id, run_id, "succeeded")
         logger.info(
-            "Vision orchestration completed; no inference performed",
+            "Fake fixture pipeline completed; no pretrained inference performed",
             extra={"correlation_id": str(run_id)},
         )
     except Exception as exc:

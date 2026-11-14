@@ -55,7 +55,7 @@ class CapturePage(BaseModel):
 
 class ProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    preset: Literal["skeleton"] = "skeleton"
+    preset: Literal["fake-fixture", "skeleton"] = "fake-fixture"
     retry: bool = False
 
 
@@ -81,3 +81,42 @@ class RunResponse(BaseModel):
     completed_at: AwareDatetime | None
     error: str | None
     job: JobResponse | None
+
+
+class DetectionResponse(BaseModel):
+    id: UUID
+    run_id: UUID
+    frame_id: UUID
+    camera_id: CameraID
+    label: str
+    det_score: float
+    box_xyxy: list[float]
+    mask_key: str | None
+    mask_score: float | None
+    embedding_key: str | None
+    embedding_metadata: dict | None
+    debug_crop_key: str | None
+
+
+class DetectionPage(BaseModel):
+    items: list[DetectionResponse]
+    limit: int
+    offset: int
+
+
+class DebugArtifact(BaseModel):
+    id: UUID
+    kind: str
+    source_id: UUID
+    camera_id: CameraID | None
+    storage_key: str
+    sha256: str
+    content_type: str
+    trace_id: str
+    url: str
+
+
+class DebugResponse(BaseModel):
+    run_id: UUID
+    manifest: dict
+    artifacts: list[DebugArtifact]

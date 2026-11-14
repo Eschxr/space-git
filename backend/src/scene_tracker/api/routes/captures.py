@@ -11,6 +11,8 @@ from scene_tracker.api.dependencies import Services, get_services
 from scene_tracker.api.schemas.captures import (
     CapturePage,
     CaptureResponse,
+    DebugResponse,
+    DetectionPage,
     EnvironmentCreate,
     EnvironmentResponse,
     ProcessRequest,
@@ -132,3 +134,29 @@ def process(capture_id: UUID, body: ProcessRequest, services: ServicesDep):
 @router.get("/processing-runs/{run_id}", response_model=RunResponse)
 def get_run(run_id: UUID, services: ServicesDep):
     return services.repository.run(run_id)
+
+
+@router.get("/processing-runs/{run_id}/detections", response_model=DetectionPage)
+def get_detections(
+    run_id: UUID,
+    services: ServicesDep,
+    camera_id: CameraID | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": services.repository.list_detections(run_id, camera_id, limit, offset),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/processing-runs/{run_id}/debug", response_model=DebugResponse)
+def get_debug(run_id: UUID, services: ServicesDep):
+    run = services.repository.run(run_id)
+    store = services.store_factory(run["environment_id"])
+    items = []
+    for artifact in services.repository.list_artifacts(run_id):
+        blob = store.stat(artifact["storage_key"])
+        items.append(artifact | {"url": store.presign(blob), "trace_id": str(run_id)})
+    return {"run_id": run_id, "manifest": run["model_manifest"], "artifacts": items}

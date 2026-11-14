@@ -25,6 +25,7 @@ ALLOWED_TYPES = {
     "application/octet-stream",
     "application/x-ply",
     "text/html",
+    "application/zip",
 }
 
 
@@ -56,6 +57,7 @@ def scoped_key(environment_id: UUID, key: str) -> str:
 
 
 class ArtifactStore(Protocol):
+    def stat(self, key: str) -> Blob: ...
     def put(self, key: str, data: bytes, content_type: str) -> Blob: ...
     def get(self, blob: Blob) -> bytes: ...
     def presign(self, blob: Blob, expires_seconds: int = 300) -> str: ...

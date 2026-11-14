@@ -119,10 +119,17 @@ def test_idempotent_processing_failure_and_new_run_retry(api):
     assert retry["job"]["id"] == first["job"]["id"]
     assert retry["job"]["attempt"] == 2
     # Old delivery must not claim the new attempt.
-    execute_vision(api.services.repository, UUID(first["job"]["id"]), UUID(first["id"]))
+    execute_vision(
+        api.services.repository,
+        UUID(first["job"]["id"]),
+        UUID(first["id"]),
+        store_factory=api.services.store_factory,
+    )
     assert api.services.repository.run(UUID(retry["id"]))["status"] == "queued"
     api.services.dispatcher.drain(
-        lambda job, run: execute_vision(api.services.repository, UUID(job), UUID(run))
+        lambda job, run: execute_vision(
+            api.services.repository, UUID(job), UUID(run), store_factory=api.services.store_factory
+        )
     )
     done = api.client.get(f"/api/v1/processing-runs/{retry['id']}").json()
     assert done["status"] == "succeeded"
@@ -194,3 +201,114 @@ def test_frame_timestamps_and_per_image_limits(api):
     failed_id = response.json()["error"]["capture_id"]
     assert api.client.get(f"/api/v1/captures/{failed_id}").json()["status"] == "failed"
     assert api.client.post(f"/api/v1/captures/{failed_id}/process", json={}).status_code == 409
+
+
+def test_synthetic_pipeline_downloads_and_traceability(api, tmp_path):
+    import json
+    import zipfile
+    from urllib.request import urlopen
+
+    from scene_tracker.domain.enums import CameraID
+    from scene_tracker.vision.fixtures import synthetic_image
+
+    env = api.client.post("/api/v1/environments", json={"name": "synthetic room"}).json()
+    uploaded = api.client.post(
+        f"/api/v1/environments/{env['id']}/captures",
+        files=[(str(c), (f"{c}.png", synthetic_image(c), "image/png")) for c in CameraID],
+    )
+    assert uploaded.status_code == 201
+    result = uploaded.json()
+    queued = api.client.post(f"/api/v1/captures/{result['id']}/process", json={}).json()
+    api.services.dispatcher.drain(
+        lambda job, run: execute_vision(
+            api.services.repository, UUID(job), UUID(run), store_factory=api.services.store_factory
+        )
+    )
+    done = api.client.get(f"/api/v1/processing-runs/{queued['id']}").json()
+    assert done["status"] == "succeeded"
+    assert done["model_manifest"]["scope"] == "synthetic_fixture_pipeline"
+    assert len(done["model_manifest"]["cameras"]) == 4
+    detections = api.client.get(f"/api/v1/processing-runs/{queued['id']}/detections").json()[
+        "items"
+    ]
+    assert len(detections) == 8
+    per_camera = api.client.get(
+        f"/api/v1/processing-runs/{queued['id']}/detections?camera_id=cam_04"
+    ).json()["items"]
+    assert len(per_camera) == 2
+    debug = api.client.get(f"/api/v1/processing-runs/{queued['id']}/debug")
+    assert debug.status_code == 200, debug.text
+    artifacts = debug.json()["artifacts"]
+    assert {a["camera_id"] for a in artifacts if a["camera_id"]} == set(CameraID)
+    for kind in ["report", "inspection_bundle"]:
+        artifact = next(a for a in artifacts if a["kind"] == kind)
+        with urlopen(artifact["url"], timeout=10) as response:
+            raw = response.read()
+        name = "summary.html" if kind == "report" else "inspection.zip"
+        (tmp_path / name).write_bytes(raw)
+        if kind == "inspection_bundle":
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                manifest = json.loads(archive.read("debug/manifest.json"))
+                assert manifest["run_id"] == queued["id"]
+                assert {c["frame_id"] for c in manifest["cameras"]} == {
+                    f["id"] for f in result["frames"]
+                }
+                assert "debug/cam_04/crop_sheet.png" in archive.namelist()
+                assert len([n for n in archive.namelist() if n.endswith(".f32")]) == 8
+    # Permit an explicitly requested local inspection export without changing service test cleanup.
+    if output := os.environ.get("SCENE_TRACKER_SMOKE_OUTPUT"):
+        from pathlib import Path
+
+        export = Path(output)
+        export.mkdir(parents=True, exist_ok=True)
+        for name in ("summary.html", "inspection.zip"):
+            (export / name).write_bytes((tmp_path / name).read_bytes())
+        (export / "run.json").write_text(json.dumps(done, indent=2))
+
+
+def test_camera_failure_retry_keeps_stored_outputs(api):
+    from scene_tracker.application.vision_pipeline import process_fake
+    from scene_tracker.domain.enums import CameraID
+    from scene_tracker.vision.detection.fake import FakeDetector
+    from scene_tracker.vision.fixtures import synthetic_image
+
+    class FaultyDetector(FakeDetector):
+        def detect(self, image, prompts, config):
+            if config[0].camera_id == CameraID.CAM_02:
+                raise RuntimeError("injected cam_02 failure")
+            return super().detect(image, prompts, config)
+
+    env = api.services.repository.create_environment("fault fixture")
+    uploaded = api.client.post(
+        f"/api/v1/environments/{env['id']}/captures",
+        files=[(str(c), (f"{c}.png", synthetic_image(c), "image/png")) for c in CameraID],
+    ).json()
+    path = f"/api/v1/captures/{uploaded['id']}/process"
+    first = api.client.post(path, json={}).json()
+    store = api.services.store_factory(env["id"])
+    with pytest.raises(RuntimeError, match="injected cam_02"):
+        api.services.dispatcher.drain(
+            lambda job, run: execute_vision(
+                api.services.repository,
+                UUID(job),
+                UUID(run),
+                stage=lambda r, c: process_fake(
+                    api.services.repository, r, c, store, detector=FaultyDetector()
+                ),
+            )
+        )
+    old_artifacts = api.services.repository.list_artifacts(UUID(first["id"]))
+    old = {a["storage_key"]: store.get(store.stat(a["storage_key"])) for a in old_artifacts}
+    failed = api.services.repository.run(UUID(first["id"]))
+    assert failed["status"] == "failed"
+    assert len(api.services.repository.list_detections(UUID(first["id"]))) == 6
+    retry = api.client.post(path, json={"retry": True}).json()
+    api.services.dispatcher.drain(
+        lambda job, run: execute_vision(
+            api.services.repository, UUID(job), UUID(run), store_factory=api.services.store_factory
+        )
+    )
+    assert api.services.repository.run(UUID(retry["id"]))["status"] == "succeeded"
+    for key, data in old.items():
+        assert store.get(store.stat(key)) == data
+    assert api.client.get(f"/api/v1/captures/{uploaded['id']}").json() == uploaded

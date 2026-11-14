@@ -65,6 +65,7 @@ class ProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     preset: Literal["fake-fixture", "skeleton", "default"] = "fake-fixture"
     retry: bool = False
+    reference_capture_id: UUID | None = None
 
 
 class JobResponse(BaseModel):

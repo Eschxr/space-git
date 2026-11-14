@@ -10,7 +10,7 @@ class ProcessingService:
         self.dispatcher = dispatcher
         self.settings = settings
 
-    def schedule(self, capture_id, preset="fake-fixture", retry=False):
+    def schedule(self, capture_id, preset="fake-fixture", retry=False, reference_capture_id=None):
         if self.settings.vision_provider == "real":
             from scene_tracker.vision.readiness import preflight
 
@@ -36,6 +36,24 @@ class ProcessingService:
                 "provider": "fake",
                 "pipeline_version": "yoloe-fake-v1",
             }
+        from scene_tracker.core.tracking_settings import TrackingSettings
+
+        config["tracking"] = TrackingSettings().model_dump()
+        config["pipeline_version"] += "-tracks-v1"
+        if reference_capture_id is not None:
+            current = self.repository.capture(capture_id)
+            baseline = self.repository.capture(reference_capture_id)
+            if (
+                baseline["environment_id"] != current["environment_id"]
+                or baseline["id"] == current["id"]
+                or baseline["captured_at"] > current["captured_at"]
+            ):
+                raise AppError(
+                    "invalid_reference",
+                    "Reference must be an earlier capture in the same environment",
+                    422,
+                )
+            config["reference_capture_id"] = str(reference_capture_id)
         digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
         job = self.repository.prepare_job(capture_id, config, digest, retry)
         if job["status"] == "queued":

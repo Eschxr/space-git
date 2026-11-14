@@ -339,3 +339,63 @@ def test_environment_prompt_catalogue_and_missing_models_before_enqueue(api):
     assert response.json()["error"]["code"] == "model_unavailable"
     with api.engine.connect() as conn:
         assert conn.scalar(select(func.count()).select_from(jobs)) == 0
+
+
+def test_camera_tracks_miss_reappear_and_reference_validation(api):
+    from sqlalchemy import select
+
+    from scene_tracker.domain.enums import CameraID
+    from scene_tracker.infrastructure.db.models import physical_objects, view_track_snapshots
+    from scene_tracker.vision.fixtures import synthetic_image
+
+    env = api.services.repository.create_environment("tracking lifecycle")
+
+    def process_fixture(empty=False, moved=False):
+        uploaded = api.client.post(
+            f"/api/v1/environments/{env['id']}/captures",
+            files=[
+                (str(c), (f"{c}.png", synthetic_image(c, empty=empty, moved=moved), "image/png"))
+                for c in CameraID
+            ],
+        ).json()
+        run = api.client.post(f"/api/v1/captures/{uploaded['id']}/process", json={}).json()
+        api.services.dispatcher.drain(
+            lambda job, r: execute_vision(
+                api.services.repository,
+                UUID(job),
+                UUID(r),
+                store_factory=api.services.store_factory,
+            )
+        )
+        with api.engine.connect() as conn:
+            return (
+                uploaded,
+                run,
+                [
+                    dict(row.state)
+                    for row in conn.execute(
+                        select(view_track_snapshots).where(
+                            view_track_snapshots.c.run_id == UUID(run["id"])
+                        )
+                    ).mappings()
+                ],
+            )
+
+    first, run1, states1 = process_fixture()
+    second, run2, states2 = process_fixture(moved=True)
+    assert {s["view_track_id"] for s in states1} == {s["view_track_id"] for s in states2}
+    _, _, missing = process_fixture(empty=True)
+    assert all(s["status"] == "unobserved" and s["missing_count"] == 1 for s in missing)
+    _, _, restored = process_fixture()
+    assert {s["view_track_id"] for s in restored} == {s["view_track_id"] for s in states1}
+    assert all(s["missing_count"] == 0 and s["before_missing_count"] == 1 for s in restored)
+    groups = {c: {s["view_track_id"] for s in restored if s["camera_id"] == c} for c in CameraID}
+    assert sum(len(x) for x in groups.values()) == len(set.union(*groups.values()))
+    with api.engine.connect() as conn:
+        assert not conn.execute(select(physical_objects)).first()
+    assert (
+        api.client.post(
+            f"/api/v1/captures/{first['id']}/process", json={"reference_capture_id": second["id"]}
+        ).status_code
+        == 422
+    )

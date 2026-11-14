@@ -127,7 +127,7 @@ def get_capture(capture_id: UUID, services: ServicesDep):
 @router.post("/captures/{capture_id}/process", response_model=RunResponse, status_code=202)
 def process(capture_id: UUID, body: ProcessRequest, services: ServicesDep):
     return ProcessingService(services.repository, services.dispatcher, services.settings).schedule(
-        capture_id, body.preset, body.retry
+        capture_id, body.preset, body.retry, body.reference_capture_id
     )
 
 

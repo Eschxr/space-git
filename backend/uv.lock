@@ -1262,6 +1262,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "redis" },
     { name = "rq" },
+    { name = "scipy" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
@@ -1301,6 +1302,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.18,<1" },
     { name = "redis", specifier = ">=5,<7" },
     { name = "rq", specifier = ">=2,<3" },
+    { name = "scipy", specifier = "==1.15.3" },
     { name = "sqlalchemy", specifier = ">=2,<3" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]

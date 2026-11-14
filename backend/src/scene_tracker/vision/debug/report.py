@@ -30,7 +30,7 @@ def report(run_id, cameras, files, provider="fake"):
             f"<section><h2>{result.camera_id.value} — {role}</h2>"
             f"<p>{html.escape(result.status)} {html.escape(result.error or '')}</p>"
         )
-        for name in ("boxes.png", "masks.png", "crop_sheet.png"):
+        for name in ("boxes.png", "masks.png", "crop_sheet.png", "tracks.png", "changes.png"):
             path = f"debug/{result.camera_id}/{name}"
             if path in files:
                 parts.append(

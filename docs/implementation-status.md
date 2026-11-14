@@ -97,3 +97,8 @@
 - Retained EXIF-corrected original-pixel evidence and compressed RLE. Added optional mask/embedding handling: missing masks and too-small regions retain detections with explicit unavailable reasons, never fabricated vectors. DINOv2's model/crop/normalization remain unchanged; exact crop/padding/resize metadata is persisted. Debug crops distinguish masked from box-only evidence.
 - Checks: 79 offline tests, 13 service tests, Ruff pass. New tests cover overlapping/edge-touching 64×64 masks, deterministic crop inputs, exact RLE pixels and missing/tiny regions. Existing service tests exercise persistence/reload and source immutability. No pretrained quality claims or weights downloaded.
 - Next: R3, continuing under full-refactor authorization.
+
+## R3 — Minimal same-camera tracks — completed
+- Added configurable appearance/geometry/category scoring, explicit unmatched Hungarian assignment and conservative ambiguity handling. Four independent camera identities; no automatic physical-object links. Missing tracks retain last-visible evidence and may reappear. Run snapshots and overlays persist scored decisions and track IDs. Additive migration 0004 preserves older data.
+- Checks: 82 offline tests and 14 PostgreSQL/Silo/Redis service tests passed; Ruff passed. Tests cover moved/stationary objects, label drift, ties, camera isolation, missing/reappearance and invalid references. Existing containers were reused, with isolated test schemas/buckets/queues. No operator data migrated or weights downloaded.
+- Next: R4, continuing under explicit full-refactor authorization.

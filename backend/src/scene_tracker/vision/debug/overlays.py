@@ -14,7 +14,7 @@ def png(image):
     return output.getvalue()
 
 
-def overlays(rgb, boxes, masks):
+def overlays(rgb, boxes, masks, tracks=None):
     boxes_image = rgb.copy()
     mask_image = rgb.copy()
     draw = ImageDraw.Draw(boxes_image)
@@ -33,12 +33,12 @@ def overlays(rgb, boxes, masks):
         mask_image.paste(blended, mask=Image.fromarray(binary.astype(np.uint8) * 255))
         x1, y1, x2, y2 = box.box_xyxy
         draw.rectangle((x1, y1, x2 - 1, y2 - 1), outline=color, width=2)
-        annotate(boxes_image, box)
+        annotate(boxes_image, box, tracks)
         masked = Image.new("RGB", rgb.size, (127, 127, 127))
         masked.paste(rgb, mask=Image.fromarray(binary.astype(np.uint8) * 255))
         crops.append((box, (masked if mask else rgb).crop(box.box_xyxy)))
     for box in boxes:
-        annotate(mask_image, box)
+        annotate(mask_image, box, tracks)
     sheet = Image.new("RGB", (320, max(1, (len(crops) + 1) // 2) * 140), "white")
     for index, (box, crop) in enumerate(crops):
         thumbnail = crop.copy()
@@ -53,13 +53,15 @@ def overlays(rgb, boxes, masks):
     return boxes_image, mask_image, sheet, crops
 
 
-def annotate(image, box):
+def annotate(image, box, tracks=None):
     draw = ImageDraw.Draw(image)
     identifier = str(box.id)
     label = "\n".join(textwrap.wrap(box.label, width=22))
+    track = (tracks or {}).get(str(box.id), "unassigned")
+    track_label = "\n".join(textwrap.wrap(track, 20))
     text = (
         f"{identifier[:18]}\n{identifier[18:]}\n{label} score={box.score:.2f}\n"
-        "view-track: unassigned\nphysical-object: unlinked"
+        f"view-track: {track_label}\nphysical-object: unlinked"
     )
     bounds = draw.multiline_textbbox((0, 0), text, stroke_width=1)
     x = max(0, min(box.box_xyxy[0], image.width - bounds[2] - 2))

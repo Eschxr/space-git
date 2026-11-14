@@ -334,13 +334,42 @@ def process_pipeline(
                 "failed_cameras": len(errors),
             },
         )
+    tracking = None
+    if not errors and hasattr(repository, "engine"):
+        from scene_tracker.application.association import associate
+
+        tracking = associate(repository, run, capture, store)
+        writer.json("debug/tracking.json", tracking, "tracking")
+        for result, frame in zip(
+            results, sorted(capture["frames"], key=lambda f: f["camera_id"]), strict=True
+        ):
+            tracks = {
+                s["observation"]["id"]: s["view_track_id"]
+                for s in tracking["states"]
+                if s["camera_id"] == result.camera_id and s["status"] == "observed"
+            }
+            rgb, _, _ = load_frame(store, frame, parse_fixture=False)
+            tracked, _, _, _ = overlays(rgb, result.detections, result.masks, tracks)
+            writer.put(
+                f"debug/{result.camera_id}/tracks.png",
+                png(tracked),
+                "image/png",
+                "tracks",
+                result.camera_id,
+            )
+        for camera, data in tracking["cameras"].items():
+            writer.json(f"debug/{camera}/matches.json", data, "matches", camera)
     for name, phase in [
         ("temporal_matches", 5),
         ("cross_view_candidates", 6),
         ("change_proposals", 7),
     ]:
         writer.json(
-            f"debug/{name}.json", {"implemented": False, "planned_phase": phase, "items": []}, name
+            f"debug/{name}.json",
+            tracking
+            if name == "temporal_matches" and tracking
+            else {"implemented": False, "planned_phase": phase, "items": []},
+            name,
         )
     timings["total"] = time.perf_counter() - start
     provenance = {

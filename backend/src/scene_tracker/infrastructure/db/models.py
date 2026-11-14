@@ -175,6 +175,8 @@ view_tracks = model(
     c("camera_id", String, nullable=False),
     c("status", String, nullable=False),
     c("first_seen_at", DateTime(timezone=True), nullable=False),
+    c("last_seen_capture_id", Uuid, nullable=True),
+    c("missing_count", Integer, server_default="0"),
     constraints=(
         unique_scope(),
         fk("environment_id", "environments", scoped=False),
@@ -199,6 +201,7 @@ physical_objects = model(
 track_observations = model(
     "track_observations",
     scope(),
+    c("run_id", Uuid, nullable=True),
     c("view_track_id", Uuid, nullable=False),
     c("detection_id", Uuid, nullable=False),
     c("capture_id", Uuid, nullable=False),
@@ -395,4 +398,31 @@ Index(
     revisions.c.environment_id,
     unique=True,
     postgresql_where=revisions.c.parent_id.is_(None),
+)
+
+
+view_track_snapshots = model(
+    "view_track_snapshots",
+    scope(),
+    c("run_id"),
+    c("view_track_id"),
+    c("camera_id", String),
+    c("capture_id"),
+    c("state", JSONB),
+    constraints=(
+        unique_scope(),
+        fk("environment_id", "environments", False),
+        fk("run_id", "processing_runs"),
+        fk("view_track_id", "view_tracks"),
+        fk("capture_id", "captures"),
+        values("camera_id", CAMERAS),
+        UniqueConstraint("run_id", "view_track_id"),
+    ),
+)
+Index(
+    "ix_observation_run_track",
+    track_observations.c.run_id,
+    track_observations.c.view_track_id,
+    unique=True,
+    postgresql_where=track_observations.c.run_id.is_not(None),
 )

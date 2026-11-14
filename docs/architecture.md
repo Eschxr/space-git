@@ -101,3 +101,29 @@ placeholders explicitly say they are not implemented. The default `fake-fixture`
 configuration includes `pipeline_version: fake-v1`, so a prior Phase 2 skeleton-only
 success is not silently reused as a Phase 3 result. The old preset name aliases the
 new configuration. Failures retry into new run IDs and preserve old evidence.
+
+
+## Phase 4 real-model boundary
+
+VisionSettings and asset preflight use CPU-only imports. Real scheduling verifies
+local checkpoint hashes, clean pinned source commits/config hashes and BERT directory
+fingerprints, and snapshots absolute paths plus the environment prompt catalogue and
+thresholds. Migration 0003 adds the nullable per-environment prompt catalogue. Workers
+recheck this snapshot and import/load upstream models only after claiming their job.
+No source/weight download is performed by readiness or inference.
+
+The same per-camera orchestrator accepts concrete adapter instances; a real-provider
+run without them fails rather than defaulting to fake adapters. Real images ignore
+synthetic PNG metadata. Grounding DINO retains raw-query/NMS decisions; SAM 2 encodes
+each nonempty frame once and preserves box-to-mask IDs. DINOv2 normalizes 384-dimensional
+CLS outputs from documented padded mask-aware crops. Canonical shape/coordinate/vector
+checks apply before persistence. Actual source/weight hashes, device/runtime/package
+metadata and preprocessing settings persist in manifests. Static reports label real
+and fake providers distinctly; tracking/association/change processing remains deferred.
+
+Torch/TorchVision and support packages are locked only in the optional vision group.
+Official upstream sources use verified operator-managed checkouts at core/model_pins.py
+commits, rather than triggering CUDA-dependent setup in the API's resolver/CPU CI.
+PointDiT/reconstruction remains a separate Python 3.12 project with no dependency changes.
+Model-readiness distinguishes file verification from runtime loading; only an operator
+real four-image smoke exercises actual inference. That smoke has not been run here.

@@ -32,10 +32,14 @@ class Repository:
             raise AppError("not_found", "Environment not found", 404)
         return dict(row)
 
-    def create_environment(self, name):
+    def create_environment(self, name, prompts=None):
         with self.engine.begin() as conn:
             return dict(
-                conn.execute(insert(environments).values(name=name).returning(environments))
+                conn.execute(
+                    insert(environments)
+                    .values(name=name, prompts=list(prompts) if prompts else None)
+                    .returning(environments)
+                )
                 .mappings()
                 .one()
             )
@@ -149,7 +153,9 @@ class Repository:
                     config_hash=config_hash,
                     model_manifest={
                         "config": config,
-                        "scope": "synthetic_fixture_pipeline",
+                        "scope": "real_vision_pipeline"
+                        if config["provider"] == "real"
+                        else "synthetic_fixture_pipeline",
                         "job_id": str(job_id),
                         "attempt": attempt,
                         "inference_performed": False,

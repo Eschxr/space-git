@@ -52,7 +52,7 @@ MULTIPART = {
 
 @router.post("/environments", response_model=EnvironmentResponse, status_code=201)
 def create_environment(body: EnvironmentCreate, services: ServicesDep):
-    return services.repository.create_environment(body.name)
+    return services.repository.create_environment(body.name, body.prompts)
 
 
 @router.post(

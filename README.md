@@ -5,9 +5,10 @@ Scene Tracker builds a reviewable semantic history from four fixed-role images:
 Original images remain immutable evidence. Same-camera tracking precedes reviewable
 cross-view associations; ambiguous identities remain unresolved for human review.
 
-Phase 3 adds a deterministic synthetic fixture pipeline with stored boxes, compressed
-masks, float32 vectors and inspection bundles. PostgreSQL, Silo and Redis integration
-tests pass. Pretrained inference, tracking, review and reconstruction remain later phases.
+Phase 4 adds real Grounding DINO → SAM 2.1 → DINOv2 adapters, pinned source/hash
+preflight and manual model smoke commands. CPU tests and PostgreSQL/Silo/Redis service
+checks pass. Real inference remains unvalidated here because operator model assets
+and the optional ML runtime are not installed. Fake processing remains the default.
 See [the plan](CODEX_IMPLEMENTATION_PLAN.md) and [implementation status](docs/implementation-status.md).
 
 ## Development
@@ -51,23 +52,26 @@ uv run reconstruction-worker --help
 Start the fake vision worker in a separate terminal from `backend/`:
 
 ```bash
-uv run --env-file ../.env --group vision scene-tracker worker vision
+uv run --env-file ../.env --no-group vision scene-tracker worker vision
 # Process queued work and exit:
-uv run --env-file ../.env --group vision scene-tracker worker vision --burst
+uv run --env-file ../.env --no-group vision scene-tracker worker vision --burst
 ```
 
 The worker uses RQ SpawnWorker and JSON serialization, never initializes GPU models
 in its parent, and reads IDs/configuration from PostgreSQL. Phase 3 supports the
 `fake-fixture` preset (`skeleton` is an alias) with `VISION_PROVIDER=fake`. It uses
 explicit fixture metadata, with manifest `inference_performed: false` and
-`scope: synthetic_fixture_pipeline`. Real mode returns `model_unavailable`;
-no fake inference is substituted. Reconstruction CLI execution remains a placeholder
+`scope: synthetic_fixture_pipeline`. Real mode verifies local assets before enqueueing and loads models only in the
+worker; missing assets return `model_unavailable` with no fake fallback. See
+[real-model setup](docs/model-setup.md) for `uv sync --group vision` and real worker commands. Reconstruction CLI execution remains a placeholder
 until Phase 9. See [API examples and retry behavior](docs/api.md).
 
 Pretrained weights and official model dependencies are separate operator setup;
-ordinary tests never fetch weights. The `vision` group currently contains CPU NumPy
-and pycocotools only; the dev group also includes them for offline tests. Real ML
-dependencies remain Phase 4 work. No real inference or model-quality validation has occurred.
+ordinary tests never fetch weights. The optional `vision` group pins Torch/TorchVision and real-model support packages.
+The dev group includes CPU NumPy/pycocotools for offline stub/fake tests, so
+`--no-group vision` never installs the heavyweight real runtime. Official source
+checkouts and weights are separate operator setup. No real inference or model-quality
+validation has occurred in this workspace.
 
 There is no frontend, camera control/calibration, registration, OpenUSD or 3D fusion.
 Movement uses pixels or normalized image coordinates. Future PointDiT outputs are
@@ -125,7 +129,7 @@ variables supplied by Compose. The existing `minio_data` named volume is retaine
 for continuity. No existing data was migrated or deleted. Silo is AGPL-3.0-or-later;
 its release source, license and notices are linked in the storage decision.
 
-Phase 3 tests pass, and PostgreSQL, Silo and Redis are left running. Stop them without
+Phase 4 tests pass, and PostgreSQL, Silo and Redis are left running. Stop them without
 deleting data using:
 
 ```bash
@@ -164,3 +168,27 @@ To export a reviewable smoke result while running the service test suite, set
 above before running `uv run --no-group vision pytest -m integration`. The export holds
 `summary.html`, `inspection.zip` and `run.json`. Temporary service schemas/buckets are
 still cleaned by tests. These fake tests verify code contracts, not pretrained model quality.
+
+
+## Optional real vision (Phase 4)
+
+Follow [model setup](docs/model-setup.md) to install pinned sources/runtime and supply
+verified local checkpoints plus BERT assets. No command here downloads weights.
+From `backend/`:
+
+```bash
+uv run --env-file ../.env --no-group vision scene-tracker model-readiness
+# After operator setup (loads real models/device but does not infer):
+uv run --env-file ../.env --group vision scene-tracker model-readiness --runtime
+# Manual-only, four supplied camera-role images; output directory must be new:
+uv run --env-file ../.env --group vision scene-tracker model-smoke \
+  --input /absolute/path/to/four-images --output /absolute/path/to/new-smoke-output
+```
+
+Set `VISION_PROVIDER=real` for the API to select the real pipeline; provider/configuration
+are snapshotted server-side, not chosen through client-provided paths. The regular worker
+uses `uv run --env-file ../.env --group vision scene-tracker worker vision`. Configure
+per-environment detector prompts when creating the environment, e.g.
+`{"name":"office","prompts":["chair","table","computer monitor","box"]}`.
+The prompt catalogue cannot ensure extraction of unknown types. Source/hash preflight
+is CPU-only; it does not certify a remote worker runtime or visual/semantic quality.

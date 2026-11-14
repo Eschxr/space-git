@@ -312,3 +312,30 @@ def test_camera_failure_retry_keeps_stored_outputs(api):
     for key, data in old.items():
         assert store.get(store.stat(key)) == data
     assert api.client.get(f"/api/v1/captures/{uploaded['id']}").json() == uploaded
+
+
+def test_environment_prompt_catalogue_and_missing_models_before_enqueue(api):
+    created = api.client.post(
+        "/api/v1/environments",
+        json={"name": "prompt-configured environment", "prompts": ["chair", "red toolbox"]},
+    )
+    assert created.status_code == 201
+    assert created.json()["prompts"] == ["chair", "red toolbox"]
+    assert api.services.repository.environment(UUID(created.json()["id"]))["prompts"] == [
+        "chair",
+        "red toolbox",
+    ]
+    assert (
+        api.client.post("/api/v1/environments", json={"name": "bad", "prompts": [""]}).status_code
+        == 422
+    )
+    result = capture(api)
+    api.services.settings.vision_provider = "real"
+    api.services.settings.vision.grounding_checkpoint = None
+    response = api.client.post(
+        f"/api/v1/captures/{result['id']}/process", json={"preset": "default"}
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "model_unavailable"
+    with api.engine.connect() as conn:
+        assert conn.scalar(select(func.count()).select_from(jobs)) == 0

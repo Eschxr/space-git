@@ -1,4 +1,4 @@
-# API (Phase 3)
+# API (Phase 4)
 
 OpenAPI is available at `/openapi.json` and interactive documentation at `/docs`.
 The service assumes one local operator without authentication. Bind to loopback.
@@ -65,7 +65,7 @@ normalized fake float32 embeddings and debug artifacts. Its manifest states
 `scope: "synthetic_fixture_pipeline"` and `inference_performed: false`. These are
 synthetic contract outputs, with no trained models executed. PNG fixture metadata
 controls boxes/appearance seeds; images without it produce zero detections and a
-warning. Real-provider requests return explicit `model_unavailable` without fallback.
+warning. Real-provider requests require verified local assets before enqueueing; see below.
 Generate fixtures with `scene-tracker synthetic-capture --output DIR`.
 
 Processing is idempotent by `(kind, capture, config hash)` with a database uniqueness
@@ -119,3 +119,28 @@ outage can prevent saving the report itself; the database still records job fail
 are placeholders with `implemented: false`, planned phase numbers and empty item
 lists. They do not claim matching or change detection has run. No object identities
 are invented; overlays show view tracks as unassigned and physical objects as unlinked.
+
+
+## Real-provider configuration (Phase 4)
+
+Environment creation accepts optional `prompts: ["chair", "table", ...]`; responses
+return the stored catalogue (null means use `VISION_PROMPTS` defaults). This catalogue
+is used by the real detector. Labels alone are not object identity, and a closed
+catalogue cannot guarantee extraction of unseen types.
+
+Set `VISION_PROVIDER=real` in server configuration and use processing preset `default`.
+The server snapshots environment prompts, thresholds, model names, absolute checkpoint
+paths/hashes, BERT directory fingerprint, source commits/config hashes and device.
+Before enqueueing it runs local file/source/hash preflight without importing Torch.
+Its `files_verified_runtime_unprobed` result does not claim GPU readiness. The worker
+re-verifies that assets match the snapshot, imports only pinned local sources and loads
+all three models once for its four frames. Model/dependency/device failures produce
+explicit `model_unavailable` errors, with no fake adapters used in real mode.
+
+Real results use `scope: real_vision_pipeline` and `provider: real`. Their manifest's
+`inference_performed` flag records whether a real-provider detector call completed;
+per-camera statuses/errors show which stages finished. This flag is execution provenance,
+not accuracy certification. The same mask/vector/artifact APIs apply, now including
+`detector_candidates.json` with kept/suppressed/rejected raw-query evidence. Thresholds
+and NMS do not automatically resolve physical-object identities. See
+[model setup and manual smoke](model-setup.md) for exact commands and current validation limits.

@@ -6,6 +6,8 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from scene_tracker.core.vision_settings import VisionSettings
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
@@ -20,6 +22,7 @@ class Settings(BaseSettings):
     s3_bucket: str = "scene-tracker"
     public_objectstore_endpoint: str = "localhost:9000"
     model_cache_dir: Path = Path("models")
+    vision: VisionSettings = Field(default_factory=VisionSettings)
     vision_provider: Literal["fake", "real"] = "fake"
     pointdit_checkpoint: Path | None = None
     dinov3_weights_dir: Path | None = None

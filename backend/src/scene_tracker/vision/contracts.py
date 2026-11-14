@@ -93,9 +93,11 @@ class ProcessingManifest(Contract):
     run_id: UUID
     capture_id: UUID
     trace_id: str
-    provider: Literal["fake"] = "fake"
-    inference_performed: Literal[False] = False
-    scope: Literal["synthetic_fixture_pipeline"] = "synthetic_fixture_pipeline"
+    provider: Literal["fake", "real"] = "fake"
+    inference_performed: bool = False
+    scope: Literal["synthetic_fixture_pipeline", "real_vision_pipeline"] = (
+        "synthetic_fixture_pipeline"
+    )
     config: dict
     config_hash: str
     provenance: dict

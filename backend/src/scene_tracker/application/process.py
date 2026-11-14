@@ -12,14 +12,32 @@ class ProcessingService:
 
     def schedule(self, capture_id, preset="fake-fixture", retry=False):
         if self.settings.vision_provider == "real":
-            raise AppError(
-                "model_unavailable", "Real adapters are not available until Phase 4", 503
-            )
-        config = {
-            "preset": "fake-fixture" if preset == "skeleton" else preset,
-            "provider": self.settings.vision_provider,
-            "pipeline_version": "fake-v1",
-        }
+            from scene_tracker.vision.readiness import preflight
+
+            capture = self.repository.capture(capture_id)
+            environment = self.repository.environment(capture["environment_id"])
+            vision = self.settings.vision
+            assets = preflight(vision)
+            resolved = vision.model_dump(mode="json")
+            for name, prefix in [
+                ("groundingdino", "grounding"),
+                ("sam2", "sam2"),
+                ("dinov2", "dinov2"),
+            ]:
+                resolved[prefix + "_source_dir"] = assets["sources"][name]["path"]
+                resolved[prefix + "_checkpoint"] = assets["checkpoints"][name]["path"]
+            resolved["bert_dir"] = assets["bert"]["path"]
+            resolved["model_cache_dir"] = str(vision.model_cache_dir.resolve())
+            config = {
+                "preset": "default",
+                "provider": "real",
+                "pipeline_version": "real-v1",
+                "vision": resolved,
+                "assets": assets,
+                "prompts": environment["prompts"] or list(vision.prompts),
+            }
+        else:
+            config = {"preset": "fake-fixture", "provider": "fake", "pipeline_version": "fake-v1"}
         digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
         job = self.repository.prepare_job(capture_id, config, digest, retry)
         if job["status"] == "queued":

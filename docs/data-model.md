@@ -41,3 +41,10 @@ A detection stores mask/crop/embedding keys and explicit embedding dimension, dt
 byte order, model and hash metadata. All blob contents remain in immutable object
 storage. Processing manifests retain per-camera contracts, input hashes, fake adapter
 source hashes, preprocessing, package versions, timing and error provenance.
+
+
+Phase 4 migration `0003` adds nullable JSONB `environments.prompts`. A null catalogue
+uses deployment VisionSettings defaults. Real runs snapshot the resolved catalogue,
+model settings, checkpoint hashes, pinned source/config hashes and BERT fingerprint
+into config/manifest metadata; distinct versions/configurations create distinct hashes.
+No image, prior run, accepted event or revision is overwritten by reprocessing.

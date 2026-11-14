@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from scene_tracker.domain.enums import CameraID, CaptureStatus, JobStatus
 
@@ -9,9 +9,17 @@ from scene_tracker.domain.enums import CameraID, CaptureStatus, JobStatus
 class EnvironmentCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=200)
+    prompts: tuple[str, ...] | None = Field(default=None, min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def valid_prompts(self):
+        if self.prompts and any(not p.strip() or len(p) > 80 or "." in p for p in self.prompts):
+            raise ValueError("prompts must be nonempty phrases up to 80 characters without dots")
+        return self
 
 
 class EnvironmentResponse(BaseModel):
+    prompts: list[str] | None = None
     id: UUID
     name: str
     created_at: AwareDatetime
@@ -55,7 +63,7 @@ class CapturePage(BaseModel):
 
 class ProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    preset: Literal["fake-fixture", "skeleton"] = "fake-fixture"
+    preset: Literal["fake-fixture", "skeleton", "default"] = "fake-fixture"
     retry: bool = False
 
 

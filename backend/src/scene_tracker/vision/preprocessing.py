@@ -6,7 +6,7 @@ from PIL import Image, ImageOps
 from scene_tracker.vision.fixtures import METADATA_KEY, FixtureScenario
 
 
-def load_frame(store, frame):
+def load_frame(store, frame, *, parse_fixture=True):
     stored = store.stat(frame["storage_key"])
     raw = store.get(replace(stored, sha256=frame["sha256"], content_type=frame["content_type"]))
     with Image.open(io.BytesIO(raw)) as image:
@@ -14,6 +14,8 @@ def load_frame(store, frame):
         rgb = ImageOps.exif_transpose(image).convert("RGB")
     if rgb.size != (frame["width"], frame["height"]):
         raise ValueError("oriented frame dimensions mismatch")
+    if not parse_fixture:
+        return rgb, None, ()
     scenario = (
         FixtureScenario.model_validate_json(metadata)
         if metadata

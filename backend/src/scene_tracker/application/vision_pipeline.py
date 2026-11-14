@@ -85,6 +85,28 @@ def validate_alignment(context, boxes, masks, embeddings):
 def process_fake(repository, run, capture, store, *, detector=None, segmenter=None, embedder=None):
     if run["model_manifest"]["config"]["provider"] != "fake":
         raise PipelineFailed("real provider cannot use fake pipeline")
+    return process_pipeline(
+        repository, run, capture, store, detector=detector, segmenter=segmenter, embedder=embedder
+    )
+
+
+def process_pipeline(
+    repository,
+    run,
+    capture,
+    store,
+    *,
+    detector=None,
+    segmenter=None,
+    embedder=None,
+    model_provenance=None,
+):
+    provider = run["model_manifest"]["config"]["provider"]
+    if provider == "real" and (detector is None or segmenter is None or embedder is None):
+        raise PipelineFailed("real provider requires concrete adapters; fake fallback is forbidden")
+    if provider not in {"fake", "real"}:
+        raise PipelineFailed("unsupported vision provider")
+    detector_called = False
     detector, segmenter, embedder = (
         detector or FakeDetector(),
         segmenter or FakeSegmenter(),
@@ -105,10 +127,23 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
         camera_start = time.perf_counter()
         artifact_start = len(writer.refs)
         try:
-            rgb, scenario, warnings = load_frame(store, frame)
+            rgb, scenario, warnings = load_frame(store, frame, parse_fixture=provider == "fake")
             config = (context, scenario)
             stage_start = time.perf_counter()
-            boxes = detector.detect(rgb, [o.label for o in scenario.objects], config)
+            prompts = (
+                [o.label for o in scenario.objects]
+                if provider == "fake"
+                else run["model_manifest"]["config"]["prompts"]
+            )
+            boxes = detector.detect(rgb, prompts, config)
+            detector_called = True
+            if hasattr(detector, "last_candidates"):
+                writer.json(
+                    f"debug/{context.camera_id}/detector_candidates.json",
+                    detector.last_candidates,
+                    "detector_candidates",
+                    context.camera_id,
+                )
             timings[f"{context.camera_id}/detect"] = time.perf_counter() - stage_start
             stage_start = time.perf_counter()
             masks = segmenter.segment(rgb, boxes, config)
@@ -161,7 +196,7 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
                         "model": embedding.model,
                         "sha256": embedding_ref.sha256,
                         "normalized": True,
-                        "synthetic": True,
+                        "synthetic": provider == "fake",
                     },
                 )
                 records.append(record)
@@ -227,7 +262,7 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
         repository.progress(
             run["id"],
             {
-                "stage": "fake_fixture_pipeline",
+                "stage": "real_vision_pipeline" if provider == "real" else "fake_fixture_pipeline",
                 "completed_cameras": len(results),
                 "total_cameras": 4,
                 "failed_cameras": len(errors),
@@ -245,7 +280,7 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
     provenance = {
         "adapters": {
             type(a).__name__: {
-                "version": "fake-v1",
+                "version": "fake-v1" if provider == "fake" else "real-v1",
                 "source_sha256": hashlib.sha256(
                     Path(sys.modules[type(a).__module__].__file__).read_bytes()
                 ).hexdigest(),
@@ -257,7 +292,12 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
         "packages": {p: importlib.metadata.version(p) for p in ["numpy", "pillow", "pycocotools"]},
         "scores": "synthetic constants, not calibrated probabilities",
     }
+    if model_provenance is not None:
+        provenance.update(model_provenance)
     manifest = ProcessingManifest(
+        provider=provider,
+        inference_performed=provider == "real" and detector_called,
+        scope="real_vision_pipeline" if provider == "real" else "synthetic_fixture_pipeline",
         run_id=run["id"],
         capture_id=capture["id"],
         trace_id=str(run["id"]),
@@ -277,7 +317,12 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
             "orientation": "EXIF transpose",
             "color": "RGB",
             "mask": "COCO compressed RLE",
-            "embedding": "fake SHA-256 seed vector; L2 normalized float32, dimension 8",
+            "embedding": "fake SHA-256 seed vector; L2 normalized float32, dimension 8"
+            if provider == "fake"
+            else (
+                "DINOv2 ViT-S/14 CLS, 384 dimensions; mask-aware padded square 224 bicubic; "
+                "ImageNet RGB mean/std; L2 normalization"
+            ),
             "crop": "mask-aware, gray background 127; no resizing",
         },
         cameras=tuple(results),
@@ -292,7 +337,10 @@ def process_fake(repository, run, capture, store, *, detector=None, segmenter=No
     )
     writer.json("debug/manifest.json", manifest_data, "manifest")
     writer.put(
-        "debug/summary.html", report(run["id"], results, writer.files), "text/html", "report"
+        "debug/summary.html",
+        report(run["id"], results, writer.files, provider=provider),
+        "text/html",
+        "report",
     )
     writer.put("inspection.zip", bundle(writer.files), "application/zip", "inspection_bundle")
     repository.save_manifest(run["id"], manifest_data)

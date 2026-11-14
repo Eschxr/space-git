@@ -10,13 +10,19 @@ def data_url(content_type, data):
     return f"data:{content_type};base64," + base64.b64encode(data).decode("ascii")
 
 
-def report(run_id, cameras, files):
+def report(run_id, cameras, files, provider="fake"):
+    heading = "Synthetic fixture" if provider == "fake" else "Pretrained vision"
     parts = [
-        "<!doctype html><html><head><meta charset='utf-8'><title>Fake vision inspection</title>"
+        "<!doctype html><html><head><meta charset='utf-8'><title>Vision inspection</title>"
         "</head><body>",
-        f"<h1>Synthetic fixture processing run {run_id}</h1>",
-        "<p>FAKE adapters. No pretrained inference or model quality validation. "
-        "No tracking, cross-view association or change proposals yet.</p>",
+        f"<h1>{heading} processing run {run_id}</h1>",
+        (
+            "<p>FAKE adapters. No pretrained inference or model quality validation. "
+            if provider == "fake"
+            else "<p>REAL adapters; inspect each camera status for execution errors. "
+            "Model quality is not certified. "
+        )
+        + "No tracking, cross-view association or change proposals yet.</p>",
     ]
     for result in cameras:
         role = "OVERHEAD" if result.camera_id.value == "cam_04" else "side"

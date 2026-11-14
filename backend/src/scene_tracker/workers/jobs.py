@@ -15,8 +15,6 @@ def execute_vision(repository, job_id, run_id, stage=None, store_factory=None):
     try:
         run = repository.run(run_id)
         capture = repository.capture(run["capture_id"])
-        if run["model_manifest"]["config"]["provider"] != "fake":
-            raise RuntimeError("model_unavailable: real adapters not implemented")
         if capture["status"] != "ready" or len(capture["frames"]) != 4:
             raise ValueError("invalid_capture")
         if stage is not None:
@@ -26,14 +24,39 @@ def execute_vision(repository, job_id, run_id, stage=None, store_factory=None):
             from scene_tracker.infrastructure.storage.factory import s3_store_factory
 
             factory = store_factory or s3_store_factory(Settings())
-            process_fake(repository, run, capture, factory(capture["environment_id"]))
+            store = factory(capture["environment_id"])
+            if run["model_manifest"]["config"]["provider"] == "real":
+                from scene_tracker.application.vision_pipeline import process_pipeline
+                from scene_tracker.core.vision_settings import VisionSettings
+                from scene_tracker.vision.readiness import ModelUnavailable, preflight
+                from scene_tracker.vision.runtime import load_models
+
+                config = run["model_manifest"]["config"]
+                settings = VisionSettings.model_validate(config["vision"])
+                if preflight(settings) != config["assets"]:
+                    raise ModelUnavailable("model assets changed after enqueue")
+                detector, segmenter, embedder, provenance = load_models(settings)
+                process_pipeline(
+                    repository,
+                    run,
+                    capture,
+                    store,
+                    detector=detector,
+                    segmenter=segmenter,
+                    embedder=embedder,
+                    model_provenance=provenance,
+                )
+            else:
+                process_fake(repository, run, capture, store)
         repository.finish_job(job_id, run_id, "succeeded")
         logger.info(
-            "Fake fixture pipeline completed; no pretrained inference performed",
+            "Vision pipeline completed; inspect manifest for provider and execution evidence",
             extra={"correlation_id": str(run_id)},
         )
     except Exception as exc:
-        repository.finish_job(job_id, run_id, "failed", f"{type(exc).__name__}: {exc}")
+        repository.finish_job(
+            job_id, run_id, "failed", f"{getattr(exc, 'code', type(exc).__name__)}: {exc}"
+        )
         logger.exception("Vision job failed", extra={"correlation_id": str(run_id)})
         raise
 

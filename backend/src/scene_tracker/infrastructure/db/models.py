@@ -80,6 +80,7 @@ CHANGES = [
 environments = model(
     "environments",
     c("name", String(200)),
+    c("prompts", JSONB, nullable=True),
     c("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 

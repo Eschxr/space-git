@@ -1,0 +1,1 @@
+"""SpaceGit local edge service."""

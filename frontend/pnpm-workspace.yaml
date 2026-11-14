@@ -1,0 +1,7 @@
+packages:
+  - apps/web
+  - packages/*
+storeDir: .cache/pnpm
+verifyDepsBeforeRun: false
+allowBuilds:
+  sharp: true

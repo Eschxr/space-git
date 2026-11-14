@@ -1,0 +1,9 @@
+# Local control and privacy
+
+The launchers bind the edge and studio to loopback. Keep the edge at 127.0.0.1:8000 and use a fresh, random operator key each session. The edge verifies operator authorization and allowed browser origin before control, revision, preview or download operations. The WebSocket authenticates its first message; keys do not travel in query strings. The browser remembers the key only on the local origin; use **Disconnect** on a shared workstation. Any trusted local operator can edit or restore layouts. There is no multi-user role system.
+
+A live preview is an in-memory JPEG, never recorded by default. The edge tracks the current frame and does not send it to any cloud. Photos are explicitly uploaded and retained as originals (including metadata) on the private disk until deleted. Use the photo list to remove originals; delete any derived job artifacts separately as part of workspace retention. Avoid uploading photos that contain sensitive information.
+
+The optional phone gateway exposes only three capture operations: upload, paired session count/status, and a request for local operator review. A random ten-minute link is scoped to one revision and capture session and cannot read photos, start a worker job or control hardware. The phone link is a bearer capability; share it only with the intended person. The HTTPS gateway limits request size. The edge records orientation, dimensions and a coarse browser device category, without persisting the raw user-agent string. The public static build disables operator features and contains only bundled fixtures.
+
+Store the SQLite database and asset directory in a private path, with backups under the same access policy. Do not reverse proxy the edge in its entirety. Do not deploy the edge, worker, .env, data directory, uploaded photos or credentials to Vercel.

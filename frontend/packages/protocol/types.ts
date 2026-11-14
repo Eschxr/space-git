@@ -1,0 +1,16 @@
+export type Pair = [number, number];
+export type Card = {id:string;marker:number;name:string;x:number;y:number;w:number;h:number;d:number;angle:number};
+export type KeepOut={id:string;name:string;x:number;y:number;w:number;h:number};
+export type PlacementRules={clearance_mm:number;keep_out:KeepOut[]};
+export type Scene = {version:1;id:string;name:string;frame:'wall-world-meters';wall:Pair;objects:Card[];constraints?:PlacementRules|null};
+export type Commit = {id:string;message:string;parents:string[];time:number;scene:Scene;evidence: {mode:string;seq?:number;calibration?:string;plan?:string;timestamp?:number;tolerance_mm?:number;dwell_s?:number}|null};
+export type State = 'DISCONNECTED'|'SETUP_REQUIRED'|'READY'|'MOVING'|'NEAR_TARGET'|'VERIFIED'|'TRACKING_LOST'|'CALIBRATION_DRIFT'|'CONFLICT';
+export type Pose = {marker:number;x:number;y:number;angle:number;confidence:number};
+export type TrackedObject = Pose & {id:string;name:string;status:'TRACKING'|'UNCERTAIN'|'LOST'|'REACQUIRED';timestamp:number;bbox:[number,number,number,number];center:Pair;contour:Pair[]};
+export type Overlay = {from?:Pair;to:Pair;arrow?:Pair[];outline:Pair[];ticks:Pair[][];distance_m?:number;name:string;progress:number;dwell?:number;confidence?:number};
+export type Live = {version:1;seq:number;timestamp:number;received_ms:number;scene_version:1;device:string;mode:'demo'|'live';state:State;poses:Pose[];anchors:number[];overlay:Overlay|null;plan:{id:string;index:number;total:number;done:boolean;saved?:string|null;save_error?:string|null}|null;camera:boolean;calibration:{id:string;mean_px:number;max_px:number;output:Pair}|null;calibration_reason?:string|null;tracked?:TrackedObject[];units?:'m'|'normalized'|null;projection_ready?:boolean};
+export type JobQuality = 'sparse'|'mesh'|'mesh_textured'|'dense'|'textured';
+export type Job = {id:string;stage:string;message:string;logs:string[];asset:string|null;count:number;commit?:string;quality?:JobQuality;artifacts?:{name:string;bytes:number}[];progress?:{done:number;total:number};current_log?:string[];duration_s?:number;cancel_requested?:boolean};
+export type VisualPlacement={commit:string;position_m:[number,number,number];rotation_deg:[number,number,number];scale:number;reference_m:number|null;reference_units:number|null};
+export type Change = {id:string;kind:'added'|'removed'|'changed';fields:string[];before:Card|null;after:Card|null};
+export type Conflict = {kind:string;ids:string[];message:string};

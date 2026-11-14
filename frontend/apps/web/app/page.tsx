@@ -1,0 +1,10 @@
+import Link from 'next/link';
+import Hero from './components/hero';
+import {Brand,Icon} from './components/icons';
+const features=[['target','Guide the move','A calibrated projector draws the next move directly onto the wall.'],['history','Keep every version','Save layouts as immutable revisions. See what moved, and restore a layout in place.'],['cube','Inspect in real 3D','Orbit a measured scene, select individual objects, and edit a layout before moving anything.']];
+export default function Home(){return <main className="landing">
+ <header className="landing-header wrap"><Brand/><nav aria-label="Main"><Link href="/world">New Worlds</Link><a href="#workflow">How it works</a><Link href="/setup">Hardware setup</Link><Link className="btn tiny" href="/studio">Launch Studio <Icon name="external" size={15}/></Link></nav></header>
+ <section className="hero wrap"><div className="hero-copy"><div className="eyebrow"><span className="signal-dot"/> CAMERA · PROJECTOR · STUDIO</div><h1>Version control<br/>for <em>physical space.</em></h1><p>Save a wall layout, see exactly what changed, and project a green route back to a previous version. Your camera verifies each move.</p><div className="actions"><Link className="btn primary" href="/world?demo=1">Start Demo <Icon name="arrow"/></Link><Link className="btn primary" href="/studio">Launch Studio <Icon name="arrow"/></Link><a className="btn" href="#workflow">See the workflow</a></div><div className="hero-caption"><Icon name="lock" size={15}/> Local camera. Private by default.</div></div><Hero/></section>
+ <section className="workflow wrap" id="workflow"><div className="section-intro"><div className="eyebrow"><span className="signal-dot"/> THE WORKFLOW</div><h2>From revision to reality.</h2></div><div className="feature-grid">{features.map(([icon,title,body],i)=><article key={title}><div><Icon name={icon} size={23}/><span className="mono">0{i+1}</span></div><h3>{title}</h3><p>{body}</p></article>)}</div></section>
+ <footer className="wrap landing-foot"><Brand/><span>Built for real walls.</span><Link href="/studio/capture">Phone capture <Icon name="arrow" size={16}/></Link></footer>
+ </main>;}

@@ -1,0 +1,1 @@
+"""SpaceGit local reconstruction worker."""

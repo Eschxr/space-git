@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:spacegit:schema:scene:1",
+  "$defs": {
+    "Card": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "marker": {
+          "maximum": 249,
+          "minimum": 4,
+          "title": "Marker",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "H",
+          "type": "number"
+        },
+        "d": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "D",
+          "type": "number"
+        },
+        "angle": {
+          "maximum": 6.284,
+          "minimum": -6.284,
+          "title": "Angle",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "marker",
+        "name",
+        "x",
+        "y",
+        "w",
+        "h",
+        "d",
+        "angle"
+      ],
+      "title": "Card",
+      "type": "object"
+    },
+    "KeepOut": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "H",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "KeepOut",
+      "type": "object"
+    },
+    "PlacementRules": {
+      "additionalProperties": false,
+      "properties": {
+        "clearance_mm": {
+          "default": 12,
+          "maximum": 250,
+          "minimum": 0,
+          "title": "Clearance Mm",
+          "type": "number"
+        },
+        "keep_out": {
+          "items": {
+            "$ref": "#/$defs/KeepOut"
+          },
+          "maxItems": 12,
+          "title": "Keep Out",
+          "type": "array"
+        }
+      },
+      "title": "PlacementRules",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "frame": {
+      "const": "wall-world-meters",
+      "default": "wall-world-meters",
+      "title": "Frame",
+      "type": "string"
+    },
+    "wall": {
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "type": "number"
+        },
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "type": "number"
+        }
+      ],
+      "title": "Wall",
+      "type": "array"
+    },
+    "objects": {
+      "items": {
+        "$ref": "#/$defs/Card"
+      },
+      "maxItems": 40,
+      "title": "Objects",
+      "type": "array"
+    },
+    "constraints": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlacementRules"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "wall",
+    "objects"
+  ],
+  "title": "Scene",
+  "type": "object"
+}

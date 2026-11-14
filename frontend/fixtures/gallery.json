@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "gallery-01",
+  "name": "Gallery wall",
+  "frame": "wall-world-meters",
+  "wall": [2.4, 1.4],
+  "objects": [
+    {"id":"a","marker":17,"name":"Exhibit A","x":0.47,"y":0.96,"w":0.33,"h":0.23,"d":0.035,"angle":0},
+    {"id":"b","marker":18,"name":"Exhibit B","x":1.05,"y":0.96,"w":0.29,"h":0.23,"d":0.035,"angle":0},
+    {"id":"c","marker":19,"name":"Exhibit C","x":1.72,"y":0.94,"w":0.37,"h":0.29,"d":0.035,"angle":0},
+    {"id":"d","marker":20,"name":"Exhibit D","x":0.66,"y":0.46,"w":0.32,"h":0.27,"d":0.035,"angle":0},
+    {"id":"e","marker":21,"name":"Exhibit E","x":1.29,"y":0.43,"w":0.29,"h":0.20,"d":0.035,"angle":0},
+    {"id":"f","marker":22,"name":"Exhibit F","x":1.90,"y":0.43,"w":0.30,"h":0.21,"d":0.035,"angle":0}
+  ]
+}

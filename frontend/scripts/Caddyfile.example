@@ -1,0 +1,52 @@
+# Optional private HTTPS phone gateway. Set this name and deploy trusted TLS for your phone.
+# On the workstation set SPACEGIT_MOBILE_ORIGIN=https://capture.example.net.
+capture.example.net {
+    @photo {
+        method POST
+        path /api/v1/capture/photos
+    }
+    handle @photo {
+        request_body {
+            max_size 16MB
+        }
+        reverse_proxy 127.0.0.1:8000 {
+            header_up Host 127.0.0.1:8000
+            # Same-origin fetches must still carry the paired mobile origin.
+            header_up Origin https://capture.example.net
+        }
+    }
+    @paired {
+        method GET
+        path /api/v1/capture/paired
+    }
+    handle @paired {
+        reverse_proxy 127.0.0.1:8000 {
+            header_up Host 127.0.0.1:8000
+            header_up Origin https://capture.example.net
+        }
+    }
+    @request {
+        method POST
+        path /api/v1/capture/paired/request
+    }
+    handle @request {
+        request_body {
+            max_size 2KB
+        }
+        reverse_proxy 127.0.0.1:8000 {
+            header_up Host 127.0.0.1:8000
+            header_up Origin https://capture.example.net
+        }
+    }
+    handle /api/* {
+        respond 404
+    }
+    handle /ws/* {
+        respond 404
+    }
+    handle {
+        root * "D:/Desktop/Python Project/SpaceGit/apps/web/out"
+        try_files {path} {path}.html {path}/index.html
+        file_server
+    }
+}

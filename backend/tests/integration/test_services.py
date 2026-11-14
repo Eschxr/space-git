@@ -117,7 +117,7 @@ def test_capture_constraints_and_immutability(database):
             )
 
 
-def test_minio_immutable_scoped_signed_download():
+def test_s3_immutable_scoped_signed_download():
     endpoint = os.environ.get("TEST_S3_ENDPOINT")
     if not endpoint:
         pytest.fail("Set TEST_S3_ENDPOINT, TEST_S3_ACCESS_KEY and TEST_S3_SECRET_KEY")

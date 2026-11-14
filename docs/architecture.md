@@ -4,7 +4,7 @@ The Python 3.11 backend is one modular package: API, core configuration/logging,
 domain, application, vision, infrastructure and workers. API imports remain CPU-only
 and do not initialize models or connect to infrastructure. Phase 0 exposes liveness.
 
-Later phases use PostgreSQL for durable state, MinIO/S3 for immutable originals and
+Later phases use PostgreSQL for durable state, Silo/S3 for immutable originals and
 artifacts, and Redis/RQ for JSON-serialized jobs carrying primitive IDs. Workers
 resolve data server-side. Database status remains authoritative beyond Redis TTLs.
 Vision runs Grounding DINO → SAM 2.1 → DINOv2 outside the API process.
@@ -44,7 +44,7 @@ metadata and bytes; it verifies metadata/checksum on reads and rejects overwrite
 It has no HTTP server and explicitly cannot issue signed URLs. S3Store uses signed
 conditional PutObject (`If-None-Match: *`) via the MinIO SDK's low-level request method;
 idempotent retries require identical bytes and metadata. This avoids a concurrent
-check-then-write race. Actual MinIO compatibility remains subject to its integration
-gate. S3 presigned GETs expire in 1–3600 seconds; use a public-endpoint client if the
+check-then-write race. The Phase 1 integration gate passes against PGSTY Silo, the approved
+S3-compatible replacement for unavailable MinIO container images. S3 presigned GETs expire in 1–3600 seconds; use a public-endpoint client if the
 worker-internal endpoint is not reachable by the downloading client. Storage service
 credentials remain trusted server-side configuration, never client inputs.

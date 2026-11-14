@@ -93,6 +93,7 @@ class RunResponse(BaseModel):
 
 
 class DetectionResponse(BaseModel):
+    view_track_id: UUID | None = None
     id: UUID
     run_id: UUID
     frame_id: UUID

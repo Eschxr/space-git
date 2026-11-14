@@ -195,3 +195,61 @@ def test_object_link_environment_and_conflicts(database):
     with pytest.raises(DBAPIError):
         with engine.begin() as connection:
             connection.execute(object_track_links.insert().values(**base, physical_object_id=obj))
+
+
+def test_legacy_revision_survives_additive_refactor(database):
+    from sqlalchemy import insert, select
+
+    from scene_tracker.infrastructure.db.models import change_proposals, processing_runs, revisions
+
+    engine, config = database
+    command.upgrade(config, "0003")
+    env, cap, run, proposal, revision = [uuid4() for _ in range(5)]
+    now = datetime.now(UTC)
+    with engine.begin() as conn:
+        conn.execute(insert(environments).values(id=env, name="legacy"))
+        conn.execute(
+            insert(captures).values(id=cap, environment_id=env, captured_at=now, status="uploading")
+        )
+        conn.execute(
+            insert(processing_runs).values(
+                id=run,
+                environment_id=env,
+                capture_id=cap,
+                status="succeeded",
+                model_manifest={},
+                config_hash="old",
+            )
+        )
+        # Core tables include new columns, so use frozen SQL for pre-migration inserts.
+        from sqlalchemy import text
+
+        conn.execute(
+            text("""INSERT INTO change_proposals
+            (id,environment_id,run_id,type,evidence,status)
+            VALUES (:id,:env,:run,'unobserved','{}','proposed')"""),
+            {"id": proposal, "env": env, "run": run},
+        )
+        conn.execute(
+            text("""INSERT INTO revisions
+            (id,environment_id,capture_id,created_at,message)
+            VALUES (:id,:env,:cap,:now,'legacy immutable')"""),
+            {"id": revision, "env": env, "cap": cap, "now": now},
+        )
+    command.upgrade(config, "head")
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(select(change_proposals.c.type).where(change_proposals.c.id == proposal))
+            == "unobserved"
+        )
+        assert (
+            conn.scalar(select(revisions.c.message).where(revisions.c.id == revision))
+            == "legacy immutable"
+        )
+    command.downgrade(config, "0003")
+    command.upgrade(config, "head")
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(select(revisions.c.message).where(revisions.c.id == revision))
+            == "legacy immutable"
+        )

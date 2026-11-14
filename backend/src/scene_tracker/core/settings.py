@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from scene_tracker.core.tracking_settings import TrackingSettings
 from scene_tracker.core.vision_settings import VisionSettings
 
 
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     public_objectstore_endpoint: str = "localhost:9000"
     model_cache_dir: Path = Path("models")
     vision: VisionSettings = Field(default_factory=VisionSettings)
+    tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     vision_provider: Literal["fake", "real"] = "fake"
     pointdit_checkpoint: Path | None = None
     dinov3_weights_dir: Path | None = None

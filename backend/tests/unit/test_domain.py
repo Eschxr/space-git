@@ -34,5 +34,5 @@ def test_canonical_vision_contracts():
 
 
 def test_initial_schema_tables():
-    assert len(metadata.tables) == 18
+    assert len(metadata.tables) == 19
     assert metadata.tables["frames"].c.captured_at.type.timezone

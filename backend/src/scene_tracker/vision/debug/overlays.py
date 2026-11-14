@@ -67,3 +67,41 @@ def annotate(image, box, tracks=None):
     x = max(0, min(box.box_xyxy[0], image.width - bounds[2] - 2))
     y = max(0, min(box.box_xyxy[1], image.height - bounds[3] - 2))
     draw.multiline_text((x, y), text, fill="black", stroke_width=1, stroke_fill="white")
+
+
+def change_overlay(rgb, changes, camera):
+    """Approximate image-space annotations; previous boxes are normalized to this image."""
+    output = rgb.copy()
+    draw = ImageDraw.Draw(output)
+    palette = {
+        "moved_in_view": "orange",
+        "appeared_in_view": "lime",
+        "missing_from_view": "red",
+        "appearance_changed": "magenta",
+        "reappeared": "cyan",
+        "uncertain": "yellow",
+    }
+    for change in changes:
+        if change["camera_id"] != camera:
+            continue
+        centers = []
+        for side in ("before_ref", "after_ref"):
+            ref = change[side]
+            if not ref:
+                continue
+            x1, y1, x2, y2 = ref["box_xyxy"]
+            box = (
+                x1 / ref["width"] * rgb.width,
+                y1 / ref["height"] * rgb.height,
+                x2 / ref["width"] * rgb.width,
+                y2 / ref["height"] * rgb.height,
+            )
+            color = palette[change["type"]]
+            draw.rectangle(box, outline=color, width=2 if side == "after_ref" else 1)
+            draw.text((box[0], box[1]), f"{change['type']} {side[:6]}", fill=color)
+            centers.append(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2))
+        if len(centers) == 2 and change["type"] == "moved_in_view":
+            draw.line(centers, fill="orange", width=2)
+            x, y = centers[-1]
+            draw.polygon([(x, y), (x - 5, y - 5), (x + 5, y - 5)], fill="orange")
+    return output

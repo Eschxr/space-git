@@ -14,6 +14,7 @@ from scene_tracker.infrastructure.db.models import (
     frames,
     jobs,
     processing_runs,
+    track_observations,
 )
 
 
@@ -278,8 +279,9 @@ class Repository:
     def list_detections(self, run_id, camera_id=None, limit=50, offset=0):
         self.run(run_id)
         query = (
-            select(detections, frames.c.camera_id)
+            select(detections, frames.c.camera_id, track_observations.c.view_track_id)
             .join(frames, detections.c.frame_id == frames.c.id)
+            .outerjoin(track_observations, track_observations.c.detection_id == detections.c.id)
             .where(detections.c.run_id == run_id)
         )
         if camera_id is not None:

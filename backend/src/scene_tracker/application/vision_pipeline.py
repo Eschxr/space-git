@@ -335,10 +335,14 @@ def process_pipeline(
             },
         )
     tracking = None
+    changes = None
     if not errors and hasattr(repository, "engine"):
         from scene_tracker.application.association import associate
 
         tracking = associate(repository, run, capture, store)
+        from scene_tracker.application.changes import persist_changes
+
+        changes = persist_changes(repository, run, tracking)
         writer.json("debug/tracking.json", tracking, "tracking")
         for result, frame in zip(
             results, sorted(capture["frames"], key=lambda f: f["camera_id"]), strict=True
@@ -349,6 +353,15 @@ def process_pipeline(
                 if s["camera_id"] == result.camera_id and s["status"] == "observed"
             }
             rgb, _, _ = load_frame(store, frame, parse_fixture=False)
+            from scene_tracker.vision.debug.overlays import change_overlay
+
+            writer.put(
+                f"debug/{result.camera_id}/changes.png",
+                png(change_overlay(rgb, changes, result.camera_id)),
+                "image/png",
+                "changes_overlay",
+                result.camera_id,
+            )
             tracked, _, _, _ = overlays(rgb, result.detections, result.masks, tracks)
             writer.put(
                 f"debug/{result.camera_id}/tracks.png",
@@ -368,6 +381,8 @@ def process_pipeline(
             f"debug/{name}.json",
             tracking
             if name == "temporal_matches" and tracking
+            else {"implemented": True, "items": changes}
+            if name == "change_proposals" and changes is not None
             else {"implemented": False, "planned_phase": phase, "items": []},
             name,
         )

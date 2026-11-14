@@ -9,7 +9,7 @@ Phase 4. Historical phase records remain in [implementation-status.md](implement
 | R1 — YOLOE prompt-free extractor | Completed: offline/stub and service gates pass; real inference unvalidated |
 | R2 — Canonical masks/embeddings/inspection | Completed: optional evidence and alignment gates pass |
 | R3 — Same-camera tracks | Completed: deterministic camera-local matching and lifecycle gates pass |
-| R4 — Events/revisions/APIs | Not started |
+| R4 — Events/revisions/APIs | Completed: review, immutable approved states and revision diffs pass |
 | R5 — Highlight manifests/mock colorizer | Not started |
 | R6 — Cleanup/docs/full fake E2E | Not started |
 | Future P9 — Real PointDiT/highlighted PLY | Deferred until after R0–R6 |

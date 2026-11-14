@@ -75,6 +75,12 @@ CHANGES = [
     "removed_candidate",
     "possible_relocation",
     "unchanged",
+    "appeared_in_view",
+    "moved_in_view",
+    "appearance_changed",
+    "missing_from_view",
+    "reappeared",
+    "uncertain",
 ]
 
 environments = model(
@@ -261,6 +267,8 @@ association_candidates = model(
 change_proposals = model(
     "change_proposals",
     scope(),
+    c("camera_id", String, nullable=True),
+    c("view_track_id", Uuid, nullable=True),
     c("run_id", Uuid, nullable=False),
     c("object_id", Uuid, nullable=True),
     c("type", String, nullable=False),
@@ -274,6 +282,8 @@ change_proposals = model(
         fk("environment_id", "environments", scoped=False),
         fk("run_id", "processing_runs"),
         fk("object_id", "physical_objects"),
+        fk("view_track_id", "view_tracks"),
+        values("camera_id", CAMERAS),
         values("status", REVIEWS),
         values("type", CHANGES),
     ),
@@ -282,6 +292,8 @@ change_proposals = model(
 revisions = model(
     "revisions",
     scope(),
+    c("idempotency_key", String, nullable=True),
+    c("request_hash", String, nullable=True),
     c("parent_id", Uuid, nullable=True),
     c("capture_id", Uuid, nullable=False),
     c("created_at", DateTime(timezone=True), nullable=False),
@@ -425,4 +437,28 @@ Index(
     track_observations.c.view_track_id,
     unique=True,
     postgresql_where=track_observations.c.run_id.is_not(None),
+)
+
+revision_track_snapshots = model(
+    "revision_track_snapshots",
+    scope(),
+    c("revision_id"),
+    c("view_track_id"),
+    c("camera_id", String),
+    c("state", JSONB),
+    constraints=(
+        unique_scope(),
+        fk("environment_id", "environments", False),
+        fk("revision_id", "revisions"),
+        fk("view_track_id", "view_tracks"),
+        values("camera_id", CAMERAS),
+        UniqueConstraint("revision_id", "view_track_id"),
+    ),
+)
+Index(
+    "ix_revision_idempotency",
+    revisions.c.environment_id,
+    revisions.c.idempotency_key,
+    unique=True,
+    postgresql_where=revisions.c.idempotency_key.is_not(None),
 )

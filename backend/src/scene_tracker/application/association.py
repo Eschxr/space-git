@@ -15,6 +15,7 @@ from scene_tracker.infrastructure.db.models import (
     environments,
     frames,
     processing_runs,
+    revision_track_snapshots,
     revisions,
     track_observations,
     view_track_snapshots,
@@ -106,6 +107,23 @@ def associate(repository, run, capture, store):
             raise AppError("already_tracked", "Run tracking snapshots already exist", 409)
         for camera in ("cam_01", "cam_02", "cam_03", "cam_04"):
             ref = reference(conn, run, capture, camera, explicit)
+            accepted = (
+                None
+                if explicit
+                else conn.execute(
+                    select(revisions)
+                    .join(captures, captures.c.id == revisions.c.capture_id)
+                    .where(
+                        revisions.c.environment_id == capture["environment_id"],
+                        captures.c.id != capture["id"],
+                        captures.c.captured_at <= capture["captured_at"],
+                    )
+                    .order_by(revisions.c.created_at.desc(), revisions.c.id)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
             previous = (
                 []
                 if ref is None
@@ -119,6 +137,16 @@ def associate(repository, run, capture, store):
                     ).mappings()
                 ]
             )
+            if accepted:
+                previous = [
+                    dict(r.state)
+                    for r in conn.execute(
+                        select(revision_track_snapshots).where(
+                            revision_track_snapshots.c.revision_id == accepted["id"],
+                            revision_track_snapshots.c.camera_id == camera,
+                        )
+                    ).mappings()
+                ]
             if explicit and ref is None:
                 raise AppError(
                     "invalid_reference",
@@ -142,7 +170,18 @@ def associate(repository, run, capture, store):
             report.update(
                 camera_id=camera,
                 reference_run_id=str(ref) if ref else None,
-                reference_capture_id=previous[0]["capture_id"] if previous else None,
+                reference_capture_id=str(accepted["capture_id"])
+                if accepted
+                else (
+                    str(
+                        conn.scalar(
+                            select(processing_runs.c.capture_id).where(processing_runs.c.id == ref)
+                        )
+                    )
+                    if ref
+                    else None
+                ),
+                reference_revision_id=str(accepted["id"]) if accepted else None,
                 run_id=str(run["id"]),
             )
             reports[camera] = report
@@ -170,6 +209,7 @@ def associate(repository, run, capture, store):
                     "uncertain": uncertain,
                     "match": candidate,
                     "reference_run_id": str(ref) if ref else None,
+                    "reference_revision_id": str(accepted["id"]) if accepted else None,
                 }
                 if not candidate:
                     conn.execute(
@@ -214,6 +254,7 @@ def associate(repository, run, capture, store):
                             "uncertain": before["view_track_id"] in report["uncertain_tracks"],
                             "match": None,
                             "reference_run_id": str(ref),
+                            "reference_revision_id": str(accepted["id"]) if accepted else None,
                         }
                     )
         for state in states:

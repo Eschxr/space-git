@@ -399,3 +399,128 @@ def test_camera_tracks_miss_reappear_and_reference_validation(api):
         ).status_code
         == 422
     )
+
+
+def sequence_capture(api, env_id, *, moved=False, empty=False, added=False):
+    import json
+
+    from PIL import PngImagePlugin
+
+    from scene_tracker.domain.enums import CameraID
+    from scene_tracker.vision.fixtures import METADATA_KEY, synthetic_image
+
+    images = []
+    for camera in CameraID:
+        data = synthetic_image(camera, moved=moved, empty=empty)
+        if added:
+            image = Image.open(io.BytesIO(data))
+            scenario = json.loads(image.info[METADATA_KEY])
+            scenario["objects"].append(
+                {
+                    "id": "new-box",
+                    "label": "box",
+                    "box_xyxy": [140, 10, 180, 45],
+                    "appearance_seed": f"{camera}-new-box",
+                }
+            )
+            metadata = PngImagePlugin.PngInfo()
+            metadata.add_text(METADATA_KEY, json.dumps(scenario))
+            stream = io.BytesIO()
+            image.save(stream, format="PNG", pnginfo=metadata)
+            data = stream.getvalue()
+        images.append((str(camera), (f"{camera}.png", data, "image/png")))
+    response = api.client.post(f"/api/v1/environments/{env_id}/captures", files=images)
+    assert response.status_code == 201, response.text
+    uploaded = response.json()
+    response = api.client.post(f"/api/v1/captures/{uploaded['id']}/process", json={})
+    assert response.status_code == 202, response.text
+    run = response.json()
+    api.services.dispatcher.drain(
+        lambda job, r: execute_vision(
+            api.services.repository, UUID(job), UUID(r), store_factory=api.services.store_factory
+        )
+    )
+    assert api.services.repository.run(UUID(run["id"]))["status"] == "succeeded"
+    changes = api.client.get(f"/api/v1/processing-runs/{run['id']}/changes").json()["items"]
+    return uploaded, run, changes
+
+
+def approve_revision(api, env_id, uploaded, changes, key):
+    for proposal in changes:
+        response = api.client.post(
+            f"/api/v1/change-proposals/{proposal['id']}/decision", json={"status": "accepted"}
+        )
+        assert response.status_code == 200, response.text
+    body = {
+        "capture_id": uploaded["id"],
+        "proposal_ids": [p["id"] for p in changes],
+        "idempotency_key": key,
+        "message": key,
+    }
+    response = api.client.post(f"/api/v1/environments/{env_id}/revisions", json=body)
+    assert response.status_code == 201, response.text
+    return response.json(), body
+
+
+def test_review_revision_history_and_rejected_baseline(api):
+    from sqlalchemy import update
+    from sqlalchemy.exc import DBAPIError
+
+    from scene_tracker.infrastructure.db.models import revision_track_snapshots
+
+    env_id = str(api.services.repository.create_environment("review sequence")["id"])
+    first, _, changes1 = sequence_capture(api, env_id)
+    assert len(changes1) == 8 and {c["type"] for c in changes1} == {"appeared_in_view"}
+    revision1, _ = approve_revision(api, env_id, first, changes1, "baseline")
+    snapshot1 = api.client.get(f"/api/v1/revisions/{revision1['id']}").json()
+    second, _, changes2 = sequence_capture(api, env_id, moved=True, added=True)
+    assert {c["type"] for c in changes2} == {"moved_in_view", "appeared_in_view"}
+    rejected = next(
+        c for c in changes2 if c["type"] == "moved_in_view" and c["camera_id"] == "cam_01"
+    )
+    assert rejected["before_ref"]["capture_id"] == first["id"]
+    assert rejected["after_ref"]["capture_id"] == second["id"]
+    assert rejected["before_ref"]["mask_url"] and rejected["after_ref"]["image_url"]
+    api.client.post(
+        f"/api/v1/change-proposals/{rejected['id']}/decision", json={"status": "rejected"}
+    )
+    accepted = [c for c in changes2 if c["id"] != rejected["id"]]
+    revision2, body = approve_revision(api, env_id, second, accepted, "changes")
+    assert (
+        api.client.post(f"/api/v1/environments/{env_id}/revisions", json=body).json() == revision2
+    )
+    assert (
+        api.client.post(
+            f"/api/v1/environments/{env_id}/revisions", json=body | {"message": "different"}
+        ).status_code
+        == 409
+    )
+    changes = api.client.get(f"/api/v1/revisions/{revision2['id']}/diff").json()["changes"]
+    assert {c["id"] for c in changes} == {c["id"] for c in accepted}
+    assert rejected["id"] not in {c["id"] for c in changes}
+    # Identical moved capture still proposes the previously rejected cam_01 move.
+    _, _, changes3 = sequence_capture(api, env_id, moved=True, added=True)
+    assert [(c["camera_id"], c["type"]) for c in changes3] == [("cam_01", "moved_in_view")]
+    assert api.client.get(f"/api/v1/revisions/{revision1['id']}").json() == snapshot1
+    assert (
+        api.client.post(
+            f"/api/v1/change-proposals/{accepted[0]['id']}/decision", json={"status": "rejected"}
+        ).status_code
+        == 409
+    )
+    assert (
+        api.client.get(
+            f"/api/v1/revisions/{revision2['id']}/diff?from_revision_id={uuid4()}"
+        ).status_code
+        == 422
+    )
+    assert (
+        api.client.post(f"/api/v1/environments/{uuid4()}/revisions", json=body).status_code == 404
+    )
+    with pytest.raises(DBAPIError, match="immutable"):
+        with api.engine.begin() as conn:
+            conn.execute(update(revision_track_snapshots).values(state={}))
+    # Missing is an image-view event, never physical removal.
+    _, _, missing = sequence_capture(api, env_id, empty=True)
+    assert {c["type"] for c in missing} == {"missing_from_view"}
+    assert all(c["before_ref"] and c["after_ref"] is None for c in missing)

@@ -19,9 +19,15 @@ def overlays(rgb, boxes, masks):
     mask_image = rgb.copy()
     draw = ImageDraw.Draw(boxes_image)
     crops = []
-    for box, mask in zip(boxes, masks, strict=True):
+    mask_index = {m.detection_id: m for m in masks}
+    for box in boxes:
+        mask = mask_index.get(box.id)
         color = tuple(70 + c % 140 for c in hashlib.sha256(box.fixture_id.encode()).digest()[:3])
-        binary = decode_mask(mask.rle).astype(bool)
+        binary = (
+            decode_mask(mask.rle).astype(bool)
+            if mask
+            else np.zeros((rgb.height, rgb.width), dtype=bool)
+        )
         tinted = Image.new("RGB", rgb.size, color)
         blended = Image.blend(mask_image, tinted, 0.4)
         mask_image.paste(blended, mask=Image.fromarray(binary.astype(np.uint8) * 255))
@@ -30,7 +36,7 @@ def overlays(rgb, boxes, masks):
         annotate(boxes_image, box)
         masked = Image.new("RGB", rgb.size, (127, 127, 127))
         masked.paste(rgb, mask=Image.fromarray(binary.astype(np.uint8) * 255))
-        crops.append((box, masked.crop(box.box_xyxy)))
+        crops.append((box, (masked if mask else rgb).crop(box.box_xyxy)))
     for box in boxes:
         annotate(mask_image, box)
     sheet = Image.new("RGB", (320, max(1, (len(crops) + 1) // 2) * 140), "white")

@@ -92,3 +92,8 @@
 - Pinned Ultralytics 8.4.0 and resolved with existing Torch 2.7.1/TorchVision 0.22.1; CPU sync installed no ML framework or weights. This is resolver/stub compatibility, not real runtime/quality validation; real smoke remains unavailable without operator assets.
 - Checks: 76 offline tests, Ruff pass; existing service suite passed (13 tests). Stub conversion covers two masks/labels, empty results, explicit missing masks, canonical dimensions and prohibition on set_classes; default four-image fake pipeline/API retained. Real weights not downloaded.
 - Next: R2, continuing under the user's explicit full-refactor authorization.
+
+## R2 — Canonical masks, embeddings and inspection — completed
+- Retained EXIF-corrected original-pixel evidence and compressed RLE. Added optional mask/embedding handling: missing masks and too-small regions retain detections with explicit unavailable reasons, never fabricated vectors. DINOv2's model/crop/normalization remain unchanged; exact crop/padding/resize metadata is persisted. Debug crops distinguish masked from box-only evidence.
+- Checks: 79 offline tests, 13 service tests, Ruff pass. New tests cover overlapping/edge-touching 64×64 masks, deterministic crop inputs, exact RLE pixels and missing/tiny regions. Existing service tests exercise persistence/reload and source immutability. No pretrained quality claims or weights downloaded.
+- Next: R3, continuing under full-refactor authorization.

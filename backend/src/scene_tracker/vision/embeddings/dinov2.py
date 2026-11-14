@@ -68,3 +68,26 @@ class DINOv2Embedder:
                 for box, vector in zip(batch, outputs, strict=True)
             )
         return results
+
+
+def crop_metadata(rgb, box, padding):
+    x1, y1, x2, y2 = box.box_xyxy
+    dx, dy = (x2 - x1) * padding, (y2 - y1) * padding
+    bounds = [
+        max(0, math.floor(x1 - dx)),
+        max(0, math.floor(y1 - dy)),
+        min(rgb.width, math.ceil(x2 + dx)),
+        min(rgb.height, math.ceil(y2 + dy)),
+    ]
+    w, h = bounds[2] - bounds[0], bounds[3] - bounds[1]
+    side = max(w, h)
+    return {
+        "canonical_crop_xyxy": bounds,
+        "square_side": side,
+        "pad_left_top": [(side - w) // 2, (side - h) // 2],
+        "input_size": [224, 224],
+        "resize": "bicubic",
+        "background_rgb": [127, 127, 127],
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+    }

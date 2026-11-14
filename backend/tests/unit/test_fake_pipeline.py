@@ -178,3 +178,38 @@ def test_rejects_adapter_alignment_and_records_diagnostics(tmp_path):
     assert all(c["status"] == "failed" for c in repository.manifests[run["id"]]["cameras"])
     assert not repository.detections
     assert any(a.kind == "report" for a in repository.artifacts)
+
+
+@pytest.mark.parametrize("tiny", [False, True])
+def test_missing_or_tiny_masks_do_not_invent_embeddings(tmp_path, tiny):
+    from scene_tracker.application.vision_pipeline import process_pipeline
+    from scene_tracker.vision.contracts import InstanceMask
+    from scene_tracker.vision.detection.fake import FakeDetector
+
+    store, capture, run = setup_capture(tmp_path)
+    repository = RecordingRepository()
+
+    class Extractor:
+        def extract(self, rgb, config):
+            ctx, scenario = config
+            boxes = FakeDetector().detect(rgb, [], (ctx, scenario))
+            masks = []
+            if tiny:
+                binary = np.zeros((ctx.height, ctx.width), dtype=np.uint8)
+                binary[0, 0] = 1
+                masks = [
+                    InstanceMask(
+                        **ctx.model_dump(), detection_id=b.id, score=1, rle=encode_mask(binary)
+                    )
+                    for b in boxes
+                ]
+            return boxes, masks
+
+    manifest = process_pipeline(repository, run, capture, store, extractor=Extractor())
+    assert len(repository.detections) == 8
+    assert all(r["embedding_key"] is None for r in repository.detections)
+    assert all(
+        r["embedding_metadata"]["unavailable_reason"] == ("small_mask" if tiny else "missing_mask")
+        for r in repository.detections
+    )
+    assert all(c.warnings for c in manifest.cameras)

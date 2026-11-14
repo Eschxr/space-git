@@ -7,7 +7,7 @@ Phase 4. Historical phase records remain in [implementation-status.md](implement
 |---|---|
 | R0 — Audit and baseline | Completed; [audit](refactor-audit.md), 74 backend offline tests, 13 service tests and 1 reconstruction test pass; lint/format pass |
 | R1 — YOLOE prompt-free extractor | Completed: offline/stub and service gates pass; real inference unvalidated |
-| R2 — Canonical masks/embeddings/inspection | Not started |
+| R2 — Canonical masks/embeddings/inspection | Completed: optional evidence and alignment gates pass |
 | R3 — Same-camera tracks | Not started |
 | R4 — Events/revisions/APIs | Not started |
 | R5 — Highlight manifests/mock colorizer | Not started |

@@ -159,34 +159,77 @@ def process_pipeline(
                 )
             timings[f"{context.camera_id}/extract"] = time.perf_counter() - stage_start
             stage_start = time.perf_counter()
-            embeddings = embedder.embed(rgb, masks, boxes, config)
+            box_ids = [b.id for b in boxes]
+            mask_ids = [m.detection_id for m in masks]
+            if len(set(box_ids)) != len(box_ids) or mask_ids != [
+                i for i in box_ids if i in mask_ids
+            ]:
+                raise ValueError("adapter detection/mask alignment mismatch")
+            if len(set(mask_ids)) != len(mask_ids):
+                raise ValueError("duplicate masks")
+            masks_by_id = {m.detection_id: m for m in masks}
+            minimum = run["model_manifest"]["config"].get("vision", {}).get("min_mask_pixels", 16)
+            eligible = [
+                b
+                for b in boxes
+                if b.id in masks_by_id and int(decode_mask(masks_by_id[b.id].rle).sum()) >= minimum
+            ]
+            embeddings = embedder.embed(
+                rgb, [masks_by_id[b.id] for b in eligible], eligible, config
+            )
+            validate_alignment(context, eligible, [masks_by_id[b.id] for b in eligible], embeddings)
+            embeddings_by_id = {e.detection_id: e for e in embeddings}
             timings[f"{context.camera_id}/embed"] = time.perf_counter() - stage_start
-            validate_alignment(context, boxes, masks, embeddings)
             boxes_image, mask_image, sheet, crops = overlays(rgb, boxes, masks)
             records, crop_index = [], []
-            for box, mask, embedding, (_, crop) in zip(
-                boxes, masks, embeddings, crops, strict=True
-            ):
-                mask_ref = writer.json(
-                    f"{context.camera_id}/masks/{box.id}.json",
-                    mask.rle.model_dump(mode="json"),
-                    "mask",
-                    context.camera_id,
+            for box, (_, crop) in zip(boxes, crops, strict=True):
+                mask, embedding = masks_by_id.get(box.id), embeddings_by_id.get(box.id)
+                reason = (
+                    "missing_mask"
+                    if mask is None
+                    else ("small_mask" if embedding is None else None)
                 )
-                embedding_ref = writer.put(
-                    f"{context.camera_id}/embeddings/{box.id}.f32",
-                    np.asarray(embedding.values, dtype="<f4").tobytes(),
-                    "application/octet-stream",
-                    "embedding",
-                    context.camera_id,
+                if reason:
+                    warnings = (*warnings, f"{box.id}: {reason}; embedding unavailable")
+                mask_ref = (
+                    writer.json(
+                        f"{context.camera_id}/masks/{box.id}.json",
+                        mask.rle.model_dump(mode="json"),
+                        "mask",
+                        context.camera_id,
+                    )
+                    if mask
+                    else None
+                )
+                embedding_ref = (
+                    writer.put(
+                        f"{context.camera_id}/embeddings/{box.id}.f32",
+                        np.asarray(embedding.values, dtype="<f4").tobytes(),
+                        "application/octet-stream",
+                        "embedding",
+                        context.camera_id,
+                    )
+                    if embedding
+                    else None
                 )
                 crop_ref = writer.put(
                     f"debug/{context.camera_id}/crops/{box.id}.png",
                     png(crop),
                     "image/png",
-                    "masked_crop",
+                    "masked_crop" if mask else "box_crop",
                     context.camera_id,
                 )
+                crop_metadata = None
+                if embedding and provider == "real":
+                    from scene_tracker.vision.embeddings.dinov2 import (
+                        crop_metadata as describe_crop,
+                    )
+
+                    crop_metadata = describe_crop(
+                        rgb,
+                        box,
+                        run["model_manifest"]["config"].get("vision", {}).get("crop_padding", 0.1),
+                    )
                 record = dict(
                     id=box.id,
                     run_id=run["id"],
@@ -195,9 +238,9 @@ def process_pipeline(
                     label=box.label,
                     det_score=box.score,
                     box_xyxy=list(box.box_xyxy),
-                    mask_key=mask_ref.key,
-                    mask_score=mask.score,
-                    embedding_key=embedding_ref.key,
+                    mask_key=mask_ref.key if mask_ref else None,
+                    mask_score=mask.score if mask else None,
+                    embedding_key=embedding_ref.key if embedding_ref else None,
                     debug_crop_key=crop_ref.key,
                     embedding_metadata={
                         "dimension": embedding.dimension,
@@ -207,15 +250,28 @@ def process_pipeline(
                         "sha256": embedding_ref.sha256,
                         "normalized": True,
                         "synthetic": provider == "fake",
-                    },
+                        "crop_transform": crop_metadata,
+                    }
+                    if embedding
+                    else {"unavailable_reason": reason},
                 )
                 records.append(record)
                 crop_index.append(
                     {
                         "detection_id": str(box.id),
                         "crop": crop_ref.model_dump(mode="json"),
-                        "mask": mask_ref.model_dump(mode="json"),
-                        "embedding": embedding_ref.model_dump(mode="json"),
+                        "mask": mask_ref.model_dump(mode="json") if mask_ref else None,
+                        "embedding": embedding_ref.model_dump(mode="json")
+                        if embedding_ref
+                        else None,
+                        "unavailable_reason": reason,
+                        "embedding_crop_transform": crop_metadata,
+                        "image_space": {
+                            "width": context.width,
+                            "height": context.height,
+                            "orientation": "canonical",
+                            "origin": "top_left",
+                        },
                     }
                 )
             writer.json(

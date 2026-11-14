@@ -524,3 +524,61 @@ def test_review_revision_history_and_rejected_baseline(api):
     _, _, missing = sequence_capture(api, env_id, empty=True)
     assert {c["type"] for c in missing} == {"missing_from_view"}
     assert all(c["before_ref"] and c["after_ref"] is None for c in missing)
+
+
+def test_highlight_api_temporal_roles_and_mock_export(api, tmp_path):
+    import numpy as np
+
+    from scene_tracker.domain.contracts import Mask
+    from scene_tracker.geometry.point_grid import (
+        GridTransform,
+        colorize_point_grid,
+        export_test_ply,
+    )
+    from scene_tracker.vision.masks import decode_mask
+
+    env_id = str(api.services.repository.create_environment("highlights")["id"])
+    first, _, changes = sequence_capture(api, env_id)
+    approve_revision(api, env_id, first, changes, "initial")
+    second, _, changes = sequence_capture(api, env_id, moved=True)
+    revision, _ = approve_revision(api, env_id, second, changes, "move")
+    query = f"?camera_id=cam_01&revision_id={revision['id']}"
+    before = api.client.get(f"/api/v1/captures/{first['id']}/highlights{query}").json()
+    after = api.client.get(f"/api/v1/captures/{second['id']}/highlights{query}").json()
+    assert before["capture_id"] == first["id"] and after["capture_id"] == second["id"]
+    assert {r["temporal_role"] for r in before["regions"]} == {"before"}
+    assert {r["temporal_role"] for r in after["regions"]} == {"after"}
+    assert before["regions"][0]["change_id"] == after["regions"][0]["change_id"]
+    assert before["frame_id"] != after["frame_id"]
+    assert after["camera_id"] == "cam_01" and len(after["regions"]) == 1
+    store = api.services.store_factory(UUID(env_id))
+    masks = {
+        r["mask_ref"]: decode_mask(Mask.model_validate_json(store.get(store.stat(r["mask_ref"]))))
+        for r in after["regions"]
+    }
+    h, w = after["image"]["height"], after["image"]["width"]
+    y, x = np.indices((h, w))
+    points = np.stack([x, y, np.ones_like(x)], axis=-1).astype(float)
+    rgb = np.full((h, w, 3), 100, dtype=np.uint8)
+    transform = GridTransform(
+        image_width=w, image_height=h, crop_xyxy=(0, 0, w, h), resize_width=w, resize_height=h
+    )
+    xyz, colors, sidecar = colorize_point_grid(points, rgb, after, masks, transform)
+    assert np.count_nonzero(sidecar["change_labels"]) == sum(m.sum() for m in masks.values())
+    export_test_ply(tmp_path / "mock", xyz, colors, sidecar)
+    # Missing objects appear only in the previous cloud, never on an empty current view.
+    missing_capture, _, missing = sequence_capture(api, env_id, empty=True)
+    missing_revision, _ = approve_revision(api, env_id, missing_capture, missing, "missing")
+    query = f"?camera_id=cam_01&revision_id={missing_revision['id']}"
+    missing_manifest = api.client.get(
+        f"/api/v1/captures/{missing_capture['id']}/highlights{query}"
+    ).json()
+    assert missing_manifest["regions"] == []
+    previous = api.client.get(f"/api/v1/captures/{second['id']}/highlights{query}").json()
+    assert all(r["temporal_role"] == "before" for r in previous["regions"])
+    other = capture(api)
+    assert api.client.get(f"/api/v1/captures/{other['id']}/highlights{query}").status_code == 422
+    assert (
+        api.client.get(f"/api/v1/captures/{second['id']}/highlights?camera_id=cam_05").status_code
+        == 422
+    )

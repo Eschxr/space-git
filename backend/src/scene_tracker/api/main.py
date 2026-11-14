@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException
 
 from scene_tracker.api.limits import UploadLimitMiddleware
 from scene_tracker.api.routes.captures import router
+from scene_tracker.api.routes.highlights import router as highlights_router
 from scene_tracker.api.routes.revisions import router as revisions_router
 from scene_tracker.core.errors import AppError
 from scene_tracker.core.logging import configure_logging
@@ -33,6 +34,7 @@ def create_app(settings=None, services=None):
     )
     app.include_router(router)
     app.include_router(revisions_router)
+    app.include_router(highlights_router)
 
     @app.exception_handler(AppError)
     async def app_error(request: Request, exc: AppError):

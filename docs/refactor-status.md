@@ -10,7 +10,7 @@ Phase 4. Historical phase records remain in [implementation-status.md](implement
 | R2 — Canonical masks/embeddings/inspection | Completed: optional evidence and alignment gates pass |
 | R3 — Same-camera tracks | Completed: deterministic camera-local matching and lifecycle gates pass |
 | R4 — Events/revisions/APIs | Completed: review, immutable approved states and revision diffs pass |
-| R5 — Highlight manifests/mock colorizer | Not started |
+| R5 — Highlight manifests/mock colorizer | Completed: temporal manifests and exact dense-grid mock PLY gates pass |
 | R6 — Cleanup/docs/full fake E2E | Not started |
 | Future P9 — Real PointDiT/highlighted PLY | Deferred until after R0–R6 |
 

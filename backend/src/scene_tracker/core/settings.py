@@ -27,3 +27,5 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     max_image_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
     max_image_pixels: int = Field(default=40_000_000, gt=0)
+    max_timestamp_skew_seconds: float = Field(default=2, ge=0)
+    s3_secure: bool = False

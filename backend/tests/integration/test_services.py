@@ -4,15 +4,13 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from urllib.request import urlopen
 from uuid import uuid4
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from minio import Minio
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.exc import DBAPIError
 
 from scene_tracker.infrastructure.db.models import captures, environments, frames, metadata
@@ -20,29 +18,6 @@ from scene_tracker.infrastructure.storage.base import StorageError
 from scene_tracker.infrastructure.storage.s3 import S3Store
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def database(monkeypatch):
-    """Use an isolated schema, never downgrade an operator's existing schema."""
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.fail("Set TEST_DATABASE_URL to the Compose PostgreSQL URL")
-    schema = "test_" + uuid4().hex
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    monkeypatch.setenv("DATABASE_URL", url)
-    monkeypatch.setenv("PGOPTIONS", f"-csearch_path={schema}")
-    isolated = create_engine(url)
-    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
-    try:
-        yield isolated, config
-    finally:
-        isolated.dispose()
-        with engine.begin() as connection:
-            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        engine.dispose()
 
 
 def test_migration_roundtrip(database):

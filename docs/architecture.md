@@ -31,10 +31,9 @@ MIME, size/pixel limits and timezone-aware timestamps before storing any bytes.
 Pillow verifies and decodes JPEG/PNG/WebP; EXIF orientation affects coordinate-frame
 dimensions only. Original width, height, orientation, timestamps and SHA-256 remain
 available. The returned ready capture includes an ordered source-manifest hash and
-skew warnings. No hardware synchronization or calibration is performed. Persisting
-uploading/failed/ready state is the Phase 2 orchestration responsibility; a storage
-failure currently raises and may leave immutable orphan blobs, never a returned
-ready capture. No automatic evidence cleanup is implemented.
+skew warnings. No hardware synchronization or calibration is performed. Phase 2 persists uploading/failed/ready states through CaptureService and the
+transactional repository. A storage failure marks the capture failed and may leave
+immutable orphan blobs, never a returned ready capture. No automatic evidence cleanup is implemented.
 
 Both storage adapters require an environment UUID. Original keys follow the plan's
 `originals/{environment_id}/...` layout and reject another environment's prefix.
@@ -48,3 +47,26 @@ check-then-write race. The Phase 1 integration gate passes against PGSTY Silo, t
 S3-compatible replacement for unavailable MinIO container images. S3 presigned GETs expire in 1–3600 seconds; use a public-endpoint client if the
 worker-internal endpoint is not reachable by the downloading client. Storage service
 credentials remain trusted server-side configuration, never client inputs.
+
+
+## Phase 2 orchestration
+
+Capture APIs persist complete four-frame captures in PostgreSQL and immutable originals
+in Silo. RQ jobs use JSON serialization with a versioned dictionary carrying job/run
+UUID strings. Queue entries contain no client paths or image bytes. Worker processes
+resolve the capture and config from the database; only the worker executes the stage.
+The CLI launches SpawnWorker with no GPU initialization in its parent. See
+[RQ worker documentation](https://python-rq.org/docs/workers/) for process/serializer behavior.
+
+Logical vision jobs are unique by environment, kind, capture subject and config hash.
+Scheduling locks the capture to serialize concurrent requests. Retry reuses the logical
+job but creates a new run with retained attempt provenance. Redis receives a unique
+job ID per attempt after database commit. Repeated queued requests can redeliver safely;
+worker claims are atomic and stale deliveries cannot claim a newer attempt.
+PostgreSQL status outlives Redis TTLs. Normal exceptions and RQ failure callbacks
+persist failures. Abrupt host loss without callbacks needs future reconciliation.
+
+Phase 2's stage validates the ready capture's four metadata records and completes
+orchestration only. Manifests explicitly state `inference_performed: false`. This is
+not the fake vision pipeline (Phase 3) or real inference (Phase 4). Real-provider
+scheduling is rejected explicitly. Reconstruction scheduling remains deferred.

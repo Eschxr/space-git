@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class JobDispatcher(Protocol):
+    def enqueue_vision(self, job_id: str, run_id: str, attempt: int) -> None: ...
+    def enqueue_reconstruction(self, job_id: str) -> None: ...

@@ -44,6 +44,7 @@ def ingest_capture(
     max_bytes: int = 20 * 1024 * 1024,
     max_pixels: int = 40_000_000,
     max_skew_seconds: float = 2,
+    capture_id: UUID | None = None,
 ) -> Capture:
     if max_bytes <= 0 or max_pixels <= 0 or max_skew_seconds < 0:
         raise ValueError("invalid ingestion limits")
@@ -52,7 +53,7 @@ def ingest_capture(
     roles = [CameraID(u.camera_id) for u in uploads]
     if len(roles) != 4 or set(roles) != set(CameraID):
         raise ValueError("exactly four unique camera roles required")
-    capture_id = uuid4()
+    capture_id = capture_id or uuid4()
     validated = []
     for upload in sorted(uploads, key=lambda u: u.camera_id):
         camera = CameraID(upload.camera_id)

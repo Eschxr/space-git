@@ -143,6 +143,8 @@ class Job(Contract):
     subject_id: UUID
     status: JobStatus
     idempotency_key: str
+    run_id: UUID | None = None
+    attempt: int = Field(default=1, gt=0)
     error: str | None = None
 
 
@@ -162,6 +164,7 @@ class ProcessingRun(Contract):
     capture_id: UUID
     status: JobStatus
     config_hash: SHA256
+    progress: dict = Field(default_factory=dict)
     model_manifest: dict = Field(default_factory=dict)
     started_at: AwareDatetime | None = None
     completed_at: AwareDatetime | None = None

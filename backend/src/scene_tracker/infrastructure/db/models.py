@@ -89,6 +89,8 @@ captures = model(
     c("captured_at", DateTime(timezone=True), nullable=False),
     c("status", String, nullable=False),
     c("source_manifest_hash", String, nullable=True),
+    c("error", Text, nullable=True),
+    c("warnings", JSONB, server_default="[]"),
     constraints=(
         unique_scope(),
         fk("environment_id", "environments", scoped=False),
@@ -131,6 +133,7 @@ processing_runs = model(
     c("status", String, nullable=False),
     c("model_manifest", JSONB, nullable=False),
     c("config_hash", String, nullable=False),
+    c("progress", JSONB, server_default='{"stage":"queued"}'),
     c("started_at", DateTime(timezone=True), nullable=True),
     c("completed_at", DateTime(timezone=True), nullable=True),
     c("error", Text, nullable=True),
@@ -326,6 +329,8 @@ jobs = model(
     c("subject_id", Uuid, nullable=False),
     c("status", String, nullable=False),
     c("idempotency_key", String, nullable=False),
+    c("run_id", Uuid, nullable=True),
+    c("attempt", Integer, server_default="1"),
     c("error", Text, nullable=True),
     constraints=(
         unique_scope(),
@@ -333,6 +338,8 @@ jobs = model(
         values("status", JOBS),
         UniqueConstraint("environment_id", "kind", "subject_id", "idempotency_key"),
         values("kind", ["vision", "reconstruction"]),
+        fk("run_id", "processing_runs"),
+        CheckConstraint("attempt > 0", name="positive_attempt"),
     ),
 )
 

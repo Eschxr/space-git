@@ -27,3 +27,10 @@ Polymorphic references (`jobs.subject_id`, `artifacts.source_id`) require applic
 ownership checks when those workflows are implemented; they are not foreign keys.
 Association candidate endpoints currently refer to view tracks. More detailed
 matching behavior is deferred. Durable jobs and review APIs are Phase 2 and later.
+
+
+Phase 2 migration `0002` adds capture error/warning metadata, processing-run progress,
+and the current run ID/attempt on durable jobs. Existing `0001` DDL is unchanged.
+Failed runs remain independently queryable after retries, with their logical job ID
+and attempt recorded in the run manifest. Schema tests cover full upgrade/downgrade
+and re-upgrade through the current head using isolated PostgreSQL schemas.

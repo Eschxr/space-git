@@ -5,9 +5,9 @@ Scene Tracker builds a reviewable semantic history from four fixed-role images:
 Original images remain immutable evidence. Same-camera tracking precedes reviewable
 cross-view associations; ambiguous identities remain unresolved for human review.
 
-Phase 1 adds domain schemas, a PostgreSQL migration, storage adapters and a four-image
-ingestion helper. Its PostgreSQL and Silo S3 integration tests pass. HTTP
-capture ingestion, inference, review and reconstruction remain later-phase work.
+Phase 2 adds capture upload/list/retrieval APIs and durable Redis/RQ orchestration.
+PostgreSQL, Silo and Redis integration tests pass. The worker currently validates
+orchestration only; vision inference, review and reconstruction remain later phases.
 See [the plan](CODEX_IMPLEMENTATION_PLAN.md) and [implementation status](docs/implementation-status.md).
 
 ## Development
@@ -26,7 +26,8 @@ uv sync --no-group vision
 uv run --no-group vision ruff check .
 uv run --no-group vision ruff format --check .
 uv run --no-group vision pytest
-uv run --no-group vision uvicorn scene_tracker.api.main:app --reload --env-file ../.env
+uv run --env-file ../.env --no-group vision alembic upgrade head
+uv run --env-file ../.env --no-group vision uvicorn scene_tracker.api.main:app --reload
 ```
 
 `GET http://127.0.0.1:8000/health/live` returns `{"status":"ok"}`.
@@ -47,17 +48,20 @@ uv run pytest
 uv run reconstruction-worker --help
 ```
 
-The CLI entry points exist, but worker execution currently exits with an explicit
-not-implemented error. Vision job orchestration arrives in Phase 2 and PointDiT
-in Phase 9. Their eventual commands are:
+Start the vision orchestration worker in a separate terminal from `backend/`:
 
 ```bash
-cd backend
-uv run --no-group vision scene-tracker worker vision
-# In a separate terminal/environment:
-cd reconstruction
-uv run reconstruction-worker
+uv run --env-file ../.env --no-group vision scene-tracker worker vision
+# Process queued work and exit:
+uv run --env-file ../.env --no-group vision scene-tracker worker vision --burst
 ```
+
+The worker uses RQ SpawnWorker and JSON serialization, never initializes GPU models
+in its parent, and reads IDs/configuration from PostgreSQL. Phase 2 supports the
+`skeleton` preset with `VISION_PROVIDER=fake`: success means orchestration completed,
+with manifest `inference_performed: false`. Real mode returns `model_unavailable`;
+no fake inference is substituted. Reconstruction CLI execution remains a placeholder
+until Phase 9. See [API examples and retry behavior](docs/api.md).
 
 Pretrained weights and official model dependencies are separate operator setup;
 ordinary tests never fetch weights. The `vision` group is currently empty pending
@@ -71,7 +75,7 @@ a single local operator; authentication is deferred and public deployment unsupp
 ## Phase 1 schema and storage tests
 
 The domain schemas, migration, immutable storage adapters and ingestion helper are
-implemented. HTTP capture ingestion and durable job orchestration remain Phase 2.
+implemented. Phase 2 adds HTTP ingestion and durable job orchestration.
 Pillow is a CPU dependency for image validation; it does not load ML models.
 
 Run offline checks from `backend/`:
@@ -84,16 +88,18 @@ uv run --no-group vision pytest
 ```
 
 Service tests are explicitly marked `integration` and excluded from the default
-suite. They require real PostgreSQL and Silo (S3-compatible storage), and fail if configuration is missing.
+suite. They require real PostgreSQL, Silo (S3-compatible storage) and Redis, and fail if
+configuration is missing.
 They create and remove only isolated test schemas and uniquely named test buckets.
 From the repository root, using local example credentials:
 
 ```bash
-docker compose --env-file .env.example -f infra/compose.yaml up -d postgres silo silo-init
+docker compose --env-file .env.example -f infra/compose.yaml up -d postgres silo silo-init redis
 export TEST_DATABASE_URL='postgresql+psycopg://scene_tracker:local-dev-change-me@localhost:5432/scene_tracker'
 export TEST_S3_ENDPOINT='localhost:9000'
 export TEST_S3_ACCESS_KEY='scene_tracker'
 export TEST_S3_SECRET_KEY='local-dev-change-me'
+export TEST_REDIS_URL='redis://localhost:6379/0'
 cd backend
 uv run --no-group vision pytest -m integration
 ```
@@ -117,9 +123,9 @@ variables supplied by Compose. The existing `minio_data` named volume is retaine
 for continuity. No existing data was migrated or deleted. Silo is AGPL-3.0-or-later;
 its release source, license and notices are linked in the storage decision.
 
-Phase 1 tests pass, and PostgreSQL and Silo are left running. Stop them without
+Phase 2 tests pass, and PostgreSQL, Silo and Redis are left running. Stop them without
 deleting data using:
 
 ```bash
-docker compose --env-file .env.example -f infra/compose.yaml stop postgres silo
+docker compose --env-file .env.example -f infra/compose.yaml stop postgres silo redis
 ```

@@ -38,7 +38,8 @@ Migrations are additive; do not reset the database. Silo bootstrap creates a pri
 bucket without deleting data; named volumes survive `docker compose down`.
 [Storage decision and pinned image](docs/adr/0002-silo-object-storage.md).
 
-For real inference, follow [model-setup.md](docs/model-setup.md). It specifies the
+For real inference, follow [model-setup.md](docs/model-setup.md) or invoke
+[the Codex automation runbook](docs/codex-real-inference-runbook.md). It specifies the
 local `yoloe-11s-seg-pf.pt` checkpoint, hashes, pinned DINOv2 source and
 `uv sync --locked --group vision`. No prompts/text encoder or old SAM setup is needed.
 API imports load no model libraries. Missing real assets fail explicitly.

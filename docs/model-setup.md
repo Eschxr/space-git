@@ -6,6 +6,10 @@ Offline/stub tests validate contracts, not pretrained quality. Missing assets fa
 with `model_unavailable`; real mode never substitutes fake inference. No test or
 startup command downloads weights.
 
+For an agent-driven setup, use [the Codex runbook](codex-real-inference-runbook.md).
+It covers explicit public-asset downloads, config preservation, standalone inference,
+the durable API/worker workflow and evidence-based reporting. It runs only when invoked.
+
 ## 1. Install the optional worker environment
 
 From `backend/`, using Python 3.11:
@@ -75,7 +79,7 @@ From `backend/`:
 
 ```bash
 # CPU-only local file hashes and source checks:
-uv run --env-file ../.env --locked --no-group vision scene-tracker model-readiness
+uv run --env-file ../.env --locked --group vision scene-tracker model-readiness
 # Worker-side real initialization; no inference:
 uv run --env-file ../.env --locked --group vision scene-tracker model-readiness --runtime
 # Real inference on exactly four supplied images, in a NEW output directory:
@@ -100,11 +104,15 @@ float32 vectors. Missing/tiny masks produce explicit unavailable embedding evide
 
 ## 4. Run through the durable API
 
+The commands below share `backend/.venv`: retain `--group vision` throughout a real
+session. Running `uv run --no-group vision` against the same environment can remove
+model packages while a worker is using them. The API still imports no model libraries.
+
 Start existing PostgreSQL/Silo/Redis, then from `backend/`:
 
 ```bash
-uv run --env-file ../.env --locked --no-group vision alembic upgrade head
-uv run --env-file ../.env --locked --no-group vision uvicorn scene_tracker.api.main:app
+uv run --env-file ../.env --locked --group vision alembic upgrade head
+uv run --env-file ../.env --locked --group vision uvicorn scene_tracker.api.main:app
 # In another terminal:
 uv run --env-file ../.env --locked --group vision scene-tracker worker vision
 ```

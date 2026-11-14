@@ -63,6 +63,56 @@ def features(value, store):
     return result
 
 
+def appearance_prototype(observation):
+    """An immutable reference to one stored observation, never an invented/averaged vector."""
+    if not observation.get("embedding_key"):
+        return None
+    return {
+        "strategy": "last_confident_embedding_v1",
+        "detection_id": observation["id"],
+        "capture_id": observation["capture_id"],
+        "frame_id": observation["frame_id"],
+        "camera_id": observation["camera_id"],
+        "embedding_key": observation["embedding_key"],
+        "embedding_metadata": observation["embedding_metadata"],
+    }
+
+
+def previous_prototype(state):
+    # Legacy snapshots remain immutable; derive a prototype in memory if they predate this field.
+    return state.get("appearance_prototype") or appearance_prototype(state["observation"])
+
+
+def track_features(state, store):
+    value = dict(state["observation"])
+    prototype = previous_prototype(state)
+    if prototype:
+        if prototype["camera_id"] != state["camera_id"]:
+            raise ValueError("cross-camera appearance prototype is forbidden")
+        value.update(
+            embedding_key=prototype["embedding_key"],
+            embedding_metadata=prototype["embedding_metadata"],
+        )
+    return features(value, store) | {
+        "view_track_id": state["view_track_id"],
+        "appearance_reference": prototype,
+    }
+
+
+def updated_prototype(before, observation, candidate, settings):
+    prototype = appearance_prototype(observation)
+    if before is None:
+        return prototype
+    if (
+        prototype
+        and candidate
+        and not candidate["embedding_missing"]
+        and candidate["terms"]["appearance"] >= settings.minimum_appearance
+    ):
+        return prototype
+    return previous_prototype(before)
+
+
 def reference(conn, run, capture, camera, explicit):
     query = (
         select(processing_runs.c.id)
@@ -161,15 +211,19 @@ def associate(repository, run, capture, store):
                     .where(detections.c.run_id == run["id"], frames.c.camera_id == camera)
                 ).mappings()
             ]
-            old_inputs = [
-                features(s["observation"], store) | {"view_track_id": s["view_track_id"]}
-                for s in previous
-            ]
+            old_inputs = [track_features(s, store) for s in previous]
             new_inputs = [features(o, store) for o in current]
             report = match(camera, old_inputs, new_inputs, settings)
+            # Approved state can combine observations from several runs/captures.
+            reference_run = str(ref) if ref and accepted is None else None
             report.update(
                 camera_id=camera,
-                reference_run_id=str(ref) if ref else None,
+                reference_run_id=reference_run,
+                reference_kind="accepted_revision"
+                if accepted
+                else "processed_run"
+                if ref
+                else "initial",
                 reference_capture_id=str(accepted["capture_id"])
                 if accepted
                 else (
@@ -198,7 +252,10 @@ def associate(repository, run, capture, store):
                 uncertain = obs["id"] in report["uncertain_detections"]
                 before = old_map.get(str(track_id))
                 state = {
+                    "schema_version": 2,
+                    "run_id": str(run["id"]),
                     "view_track_id": str(track_id),
+                    "appearance_prototype": updated_prototype(before, obs, candidate, settings),
                     "camera_id": camera,
                     "capture_id": str(capture["id"]),
                     "status": "observed",
@@ -208,7 +265,7 @@ def associate(repository, run, capture, store):
                     "before_missing_count": before["missing_count"] if before else 0,
                     "uncertain": uncertain,
                     "match": candidate,
-                    "reference_run_id": str(ref) if ref else None,
+                    "reference_run_id": reference_run,
                     "reference_revision_id": str(accepted["id"]) if accepted else None,
                 }
                 if not candidate:
@@ -247,13 +304,16 @@ def associate(repository, run, capture, store):
                     states.append(
                         before
                         | {
+                            "schema_version": 2,
+                            "run_id": str(run["id"]),
+                            "appearance_prototype": previous_prototype(before),
                             "capture_id": str(capture["id"]),
                             "status": "unobserved",
                             "missing_count": before["missing_count"] + 1,
                             "before": before["observation"],
                             "uncertain": before["view_track_id"] in report["uncertain_tracks"],
                             "match": None,
-                            "reference_run_id": str(ref),
+                            "reference_run_id": reference_run,
                             "reference_revision_id": str(accepted["id"]) if accepted else None,
                         }
                     )
@@ -282,4 +342,4 @@ def associate(repository, run, capture, store):
                     ),
                 )
             )
-    return {"schema_version": 1, "run_id": str(run["id"]), "cameras": reports, "states": states}
+    return {"schema_version": 2, "run_id": str(run["id"]), "cameras": reports, "states": states}

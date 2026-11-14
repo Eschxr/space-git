@@ -53,7 +53,6 @@ def compare(old, new, settings):
     ):
         appearance = float(np.clip(np.dot(x, y), -1, 1))
     category = 1.0 if normalize_label(old["label"]) == normalize_label(new["label"]) else 0.4
-    weights = settings
     terms = {
         "appearance": appearance,
         "position": max(0, 1 - distance / math.sqrt(2)),
@@ -61,29 +60,57 @@ def compare(old, new, settings):
         "class": category,
         "displacement_norm": distance,
         "area_ratio": ratio,
+        "scale": 1 / ratio,
     }
-    weighted = (
-        weights.position_weight * terms["position"]
-        + weights.iou_weight * overlap
-        + weights.class_weight * category
-    )
-    denominator = weights.position_weight + weights.iou_weight + weights.class_weight
-    if appearance is not None:
-        weighted += weights.appearance_weight * max(0, appearance)
-        denominator += weights.appearance_weight
-    score = weighted / max(denominator, 1e-12)
-    if appearance is None:
-        score *= 1 - settings.fallback_penalty
-    valid = ratio <= settings.max_area_ratio and (
+    weights = {
+        "appearance": settings.appearance_weight if appearance is not None else 0,
+        "position": settings.position_weight,
+        "iou": settings.iou_weight,
+        "class": settings.class_weight,
+        "scale": settings.scale_weight,
+    }
+    denominator = sum(weights.values())
+    if denominator <= 0:
+        # Appearance-only configuration with unavailable appearance has no usable signal.
+        contributions = {name: 0.0 for name in weights}
+        score = 0.0
+    else:
+        contributions = {
+            name: weight * max(0, terms[name] or 0) / denominator
+            for name, weight in weights.items()
+        }
+        score = sum(contributions.values())
+    cost_components = {
+        name: weight / denominator - contributions[name] if denominator > 0 else 0.0
+        for name, weight in weights.items()
+    }
+    penalty = score * settings.fallback_penalty if appearance is None else 0.0
+    cost_components["missing_embedding_penalty"] = penalty
+    if denominator <= 0:
+        cost_components["no_usable_signal"] = 1.0
+    score = max(0.0, min(1.0, score - penalty))
+    reasons = []
+    if ratio > settings.max_area_ratio:
+        reasons.append("area_ratio_exceeds_gate")
+    if not (
         appearance is not None
         and appearance >= settings.minimum_appearance
         or overlap >= settings.fallback_iou_gate
         and distance <= settings.fallback_displacement_gate
-    )
+    ):
+        reasons.append("appearance_and_geometry_below_gates")
+    if denominator <= 0:
+        reasons.append("no_usable_signal")
     return {
         "score": score,
-        "valid": bool(valid),
+        "cost": 1 - score,
+        "cost_components": cost_components,
+        "score_components": contributions,
+        "effective_weight_sum": denominator,
+        "valid": not reasons,
+        "gate_reasons": reasons,
         "terms": terms,
         "embedding_missing": appearance is None,
         "mask_iou": old.get("mask") is not None and new.get("mask") is not None,
+        "appearance_reference": old.get("appearance_reference"),
     }

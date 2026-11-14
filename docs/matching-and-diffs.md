@@ -13,13 +13,17 @@ Chosen run/capture/revision references persist in tracking JSON and each snapsho
 Explicit debug references cannot be committed on top of an unrelated accepted baseline.
 
 Candidate scores combine compatible DINOv2 cosine appearance (0.45), normalized centre
-position (0.25), canonical mask IoU or box IoU (0.20), and soft class consistency (0.10).
+position (0.25), canonical mask IoU or box IoU (0.20), soft class consistency (0.10), and scale similarity (0.05). Raw weights are
+normalized by their effective sum; unavailable appearance is excluded.
 Label case/plurals and a small explicit synonym map are normalized only for scoring;
 raw model labels remain stored. Different classes are a soft penalty. Area-ratio and
 appearance/spatial gates reject implausible candidates while allowing movement.
 Hungarian assignment includes unmatched options. Small top-two margins on either side
 block forced assignment; candidate terms and unresolved alternatives remain inspectable.
-Ties and output ordering are deterministic. Missing embeddings use geometry/category
+Reports persist actual costs and their term contributions, gate/reject reasons, both
+sides' top-two valid scores/margins and explicit unmatched decisions. Close margins
+block assignment when both alternatives clear the score threshold; a score equal to
+the unmatched threshold remains unmatched. Ties and output ordering are deterministic. Missing embeddings use geometry/category
 with an uncertainty penalty and yield uncertain change hypotheses, not strong identity.
 
 `TRACKING` accepts JSON overrides in `.env` or environment, for example:
@@ -54,3 +58,17 @@ and support an optional ancestor `from_revision_id`; signed visualization URLs a
 regenerated and naturally change/expire while the underlying evidence remains immutable.
 
 See [API](api.md) for review/commit calls and [highlight semantics](highlights.md).
+
+
+Phase 5 retains a last-confident-embedding prototype in each immutable track snapshot.
+It references the original vector blob plus source capture/frame/detection/camera and
+metadata, rather than averaging vectors. A confident appearance-supported match advances
+it; a missing mask/vector, low appearance confidence or missed observation retains it.
+Ambiguous new tracks do not overwrite another identity. Geometry/masks still come from
+the most recent observation; candidate evidence identifies the appearance source. Legacy
+snapshots derive a reference in memory from their observation if available, without
+rewriting history. No fabricated embedding is attached to a maskless detection.
+
+Read-only track/history endpoints are documented in [API](api.md). Snapshot schema v2
+and the new pipeline configuration preserve old run IDs/artifacts/revisions. No new
+relational migration or model dependency is needed for this Phase 5 consolidation.

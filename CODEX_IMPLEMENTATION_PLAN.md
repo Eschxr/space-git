@@ -87,14 +87,15 @@ do not establish pixel correspondence. Emit one cloud per view; no alignment/fus
 | 4 | Real YOLOE + DINOv2 adapters completed by R1–R2/R6; real runtime/quality still unvalidated |
 | R0–R6 | Refactor completed; see docs/refactor-status.md |
 | 5 | Consolidate camera-local permanence: explicit prototypes, complete cost/margin diagnostics and readable history; completed at this checkpoint |
-| 6 | Original automatic cross-camera engine superseded; optional manual link metadata deferred, never a prerequisite |
-| 7 | Image-view proposal/review behavior delivered by R4; future changes require a scoped request |
-| 8 | Immutable track-based accepted revisions/diffs delivered by R4; retain old history |
+| 6 | Remaining: discoverable capture/run/review workflow and complete reference policy; original automatic cross-camera engine superseded |
+| 7 | Core proposals/review in R4; remaining: append-only review audit and complete decision/evidence semantics |
+| 8 | Core commits/snapshots/event diffs in R4; remaining: complete image/provenance responses, accepted track history, state comparison and acceptance gates |
 | 9 | Real PointDiT integration deferred; separate future implementation/hardware/access gate |
 | 10 | Fake E2E/docs delivered by R6; real operational validation remains separate |
 
 This mapping does not claim all future phases or real pretrained validation are done.
-Do not implement original Phase 6–8 algorithms simply to fill obsolete phase numbers.
+Complete the remaining Phase 6–8 image-history work below using camera-local identities.
+Do not reintroduce the superseded automatic cross-camera engine.
 
 ## Phase 5 — Complete same-camera object permanence
 
@@ -162,6 +163,66 @@ Record exact tests, skipped manual real validation, migration/data/container eff
 and Phase 5 assessment in `docs/implementation-status.md`. Update current progress.
 Suggested commit: `feat: persist robust per-camera object tracks`.
 **Stop after Phase 5. Do not begin Phase 6 or Phase 9.**
+
+## Remaining Phase 6–8 — complete the image-based history system
+
+R4 delivered core mechanics and a two-capture fake gate, not every original Phase 7/8
+requirement. The detailed source audit and requirement mapping are in
+[docs/phase8-gap-assessment.md](docs/phase8-gap-assessment.md). Preserve existing
+commit/snapshot APIs and complete these phases sequentially, only when requested.
+No runtime work on these phases was performed by the assessment.
+
+### Phase 6 — Capture/run/review workflow and reference policy
+
+- List all processing attempts for a capture and expose their provenance/reference
+  summaries, using existing captures/runs without recreating the ingestion scaffold.
+- Make observed/pending-review/approved state discoverable through typed APIs and a
+  usable CLI or documented HTTP workflow; a frontend is not part of this scope.
+- Define and test initial/unapproved/approved baseline selection, same-capture reruns,
+  explicit debug references, backdated captures and concurrent head advancement.
+  Preserve stale-baseline rejection, originals and prior revisions.
+- Define no-change/no-commit outcomes. Empty-baseline commits are optional; retain
+  the current nonempty restriction explicitly unless a separate extension is added.
+
+**Gate:** clients can discover capture processing history and inspect the current
+four-view evidence versus approved state; reference edge cases are deterministic.
+Run offline/static and isolated service gates, update implementation status and stop.
+This phase replaces the old cross-camera identity engine; manual physical links remain optional.
+
+### Phase 7 — Auditable semantic review completion
+
+- Preserve current appeared/moved/appearance/missing/reappeared/uncertain proposals
+  and their accepted-reference comparisons. Improve evidence where required by review.
+- Store append-only decisions with previous/new status, decision time, reviewer label
+  and reason; keep current status queryable and decision retries idempotent.
+- Define what accepting uncertain means, repeated missing/reappearance behavior, and
+  which state is applied. Never turn camera-local uncertainty into automatic physical facts.
+- If reviewer corrections/reassociation are included, persist explicit reviewed records
+  rather than editing detections. Do not make optional cross-camera links a prerequisite.
+
+**Gate:** a multi-capture sequence yields correct source-linked proposals and auditable
+accepted/rejected/needs-review transitions; originals/committed payloads are immutable.
+Run required offline/service tests, update implementation status and stop.
+
+### Phase 8 — Complete immutable image-history APIs
+
+- Keep atomic idempotent parent-linked commits and approved snapshots; add direct,
+  typed revision-level source/run/model/config/immutable-artifact provenance.
+- Return historical four-camera source images, approved track states and signed
+  mask/crop/annotated-overlay evidence. Clearly distinguish latest source images from
+  approved state that may retain evidence from older captures after rejection.
+- Add accepted per-view-track revision history, separate from observational run history.
+- Preserve the existing ancestor event diff and add explicit endpoint-state comparison,
+  with deterministic before/after camera-local evidence across nonadjacent revisions.
+  Specify identical/reverse/unrelated comparison behavior. Do not silently rename APIs.
+- Complete concurrency/rollback/cross-environment/schema-contract and multi-revision
+  lifecycle tests. Reprocessing/failures must leave historical revisions unchanged.
+  General event replay, branches/merges and image-delta chains are not required.
+
+**Gate:** baseline→unchanged→move/add→partial rejection→missing→reappearance round-trips
+through review/commits into correct linear snapshots, accepted track history, event logs
+and state comparisons, with complete image evidence. Run static/offline/service gates,
+update implementation status and stop. PointDiT is not part of this gate.
 
 ## Future work and operator validation
 

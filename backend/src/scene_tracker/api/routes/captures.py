@@ -18,9 +18,11 @@ from scene_tracker.api.schemas.captures import (
     ProcessRequest,
     RunResponse,
 )
+from scene_tracker.api.schemas.history import RunPage, WorkflowResponse
 from scene_tracker.application.captures import CaptureService
 from scene_tracker.application.ingest import ImageUpload
 from scene_tracker.application.process import ProcessingService
+from scene_tracker.application.workflow import capture_workflow, run_summary
 from scene_tracker.core.errors import AppError
 from scene_tracker.domain.enums import CameraID
 
@@ -122,6 +124,24 @@ def list_captures(
 @router.get("/captures/{capture_id}", response_model=CaptureResponse)
 def get_capture(capture_id: UUID, services: ServicesDep):
     return services.repository.capture(capture_id)
+
+
+@router.get("/captures/{capture_id}/processing-runs", response_model=RunPage)
+def capture_runs(
+    capture_id: UUID,
+    services: ServicesDep,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    rows = services.repository.list_runs(capture_id, limit, offset)
+    with services.repository.engine.connect() as conn:
+        items = [run_summary(conn, row) for row in rows]
+    return {"items": items, "limit": limit, "offset": offset}
+
+
+@router.get("/captures/{capture_id}/workflow", response_model=WorkflowResponse)
+def workflow(capture_id: UUID, services: ServicesDep):
+    return capture_workflow(services, capture_id)
 
 
 @router.post("/captures/{capture_id}/process", response_model=RunResponse, status_code=202)

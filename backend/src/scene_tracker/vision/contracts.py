@@ -6,7 +6,7 @@ import math
 from typing import Literal, Protocol
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from scene_tracker.domain.contracts import Contract, Mask, Score
 from scene_tracker.domain.enums import CameraID
@@ -89,6 +89,8 @@ class PerCameraResult(FrameContext):
 class ProcessingManifest(Contract):
     job_id: UUID | None = None
     attempt: int = Field(default=1, ge=1)
+    scheduled_at: AwareDatetime | None = None
+    reference: dict | None = None
     schema_version: Literal[1] = 1
     run_id: UUID
     capture_id: UUID

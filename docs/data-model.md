@@ -51,7 +51,7 @@ No image, prior run, accepted event or revision is overwritten by reprocessing.
 
 ## Current refactor additions
 
-There are now **19** application tables. Migration `0004` adds last-seen capture and
+There are now **20** application tables. Migration `0004` adds last-seen capture and
 missing count to view tracks, run IDs on observations, and immutable
 `view_track_snapshots`. Snapshot/observation checks enforce camera, capture/run and
 environment consistency. Unique run/track observations prevent duplicate identity
@@ -79,3 +79,17 @@ stay in immutable binary blobs; source IDs, model, dimension and hash stay in JS
 Legacy snapshots remain unchanged and derive an optional prototype in memory. Registry
 columns remain advisory. No migration beyond 0005 is introduced by Phase 5. New track
 history APIs read existing snapshot rows with capture/run order and explicit run status.
+
+Phase 6 records an immutable baseline selection and scheduling time in each run's
+versioned config/manifest. Its config hash includes that reference, so advancing the
+approved head creates a distinct processing request. The worker consumes that exact
+baseline and commits check it against the environment head.
+
+Migration `0006` adds append-only `review_decisions` with environment/proposal
+foreign keys, previous/new status and reason, reviewer label, UTC decision time,
+optional per-proposal idempotency key and request hash. Database triggers reject
+decision updates/deletes. Existing current proposal status/reason remain queryable.
+New revisions snapshot run/model/config/frame/artifact provenance into nullable
+JSONB `revisions.provenance`, protected by the existing revision immutability
+trigger. Old rows retain null provenance and derive an explicitly tagged read view
+from their existing evidence. Migration 0006 preserves earlier accepted rows.

@@ -6,6 +6,8 @@ from fastapi import APIRouter, Query
 from sqlalchemy import select
 
 from scene_tracker.api.routes.captures import ServicesDep
+from scene_tracker.api.schemas.history import AcceptedTrackPage
+from scene_tracker.application.history import accepted_track_history
 from scene_tracker.application.revisions import require
 from scene_tracker.infrastructure.db.models import (
     captures,
@@ -15,6 +17,16 @@ from scene_tracker.infrastructure.db.models import (
 )
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/view-tracks/{track_id}/revisions", response_model=AcceptedTrackPage)
+def accepted_history(
+    track_id: UUID,
+    services: ServicesDep,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return accepted_track_history(services, track_id, limit, offset)
 
 
 def track(conn, track_id):

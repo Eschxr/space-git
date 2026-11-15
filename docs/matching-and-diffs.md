@@ -5,12 +5,19 @@ uses its own tracks. `physical_objects` and manual link tables remain compatible
 are never populated automatically. A cross-camera move is missing/appeared evidence,
 not a proven physical relocation.
 
-Reference selection prefers the latest eligible accepted revision's **approved track
-snapshots**, then a succeeded processed capture with tracking evidence. Future captures,
-same-capture references and other environments are excluded. An explicit
-`reference_capture_id` on process requests selects processed evidence for debugging.
-Chosen run/capture/revision references persist in tracking JSON and each snapshot.
-Explicit debug references cannot be committed on top of an unrelated accepted baseline.
+Scheduling records the latest eligible accepted revision's **approved track snapshots**,
+or a succeeded processed capture with tracking evidence when there is no eligible
+approved baseline. It locks the environment while selecting and hashes that reference
+into the processing config. All four cameras consume the recorded reference, including
+when the head advances before execution. Future captures, same-capture processed-run
+references and other environments are excluded.
+
+An explicit `reference_capture_id` selects processed evidence for inspection.
+Reprocessing the capture already at the approved head uses that head's approved states.
+These runs and backdated captures whose eligible reference predates the current head
+are inspection-only. Their results preserve earlier runs and revisions. Normal commits
+require the recorded accepted parent to remain current. The API workflow response
+exposes inspection/stale outcomes and source references.
 
 Candidate scores combine compatible DINOv2 cosine appearance (0.45), normalized centre
 position (0.25), canonical mask IoU or box IoU (0.20), soft class consistency (0.10), and scale similarity (0.05). Raw weights are
@@ -58,6 +65,19 @@ and support an optional ancestor `from_revision_id`; signed visualization URLs a
 regenerated and naturally change/expire while the underlying evidence remains immutable.
 
 See [API](api.md) for review/commit calls and [highlight semantics](highlights.md).
+
+Decisions append previous/new status, reasons, reviewer label, UTC time and an optional
+idempotency key. A keyed retry returns its recorded decision alongside current proposal
+status. Accepting an uncertain proposal applies its exact camera-local snapshot with
+uncertainty retained. Repeated accepted missing events retain the last-visible
+observation and advance the counter. Accepted reappearance resets it. Approved state
+advances only through a selected commit.
+
+Revision `/diff` retains the ancestor event log. Revision `/compare` returns endpoint
+content with both observations and deterministic ordering. It includes unchanged tracks
+and supports identical and reverse comparisons. The per-track `/revisions` endpoint
+lists accepted changes with their prior/approved states. These APIs preserve source
+capture/frame/camera references for overlays and future per-view cloud mapping.
 
 
 Phase 5 retains a last-confident-embedding prototype in each immutable track snapshot.

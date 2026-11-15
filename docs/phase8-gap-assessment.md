@@ -7,6 +7,10 @@ real-inference validation. The original Phase 6–8 requirements remain in
 
 ## Correction to the earlier progress mapping
 
+The subsequent Phase 6–8 implementation has completed these gaps. Its evidence,
+commands and platform limits are recorded in [implementation-status](implementation-status.md).
+The audit below preserves the findings that defined that work.
+
 R4 implemented the core Phase 7/8 mechanics and passed a two-capture fake workflow.
 Describing those phases simply as "delivered" hid remaining requirements. Phase 5
 completed tracking, not the full image-history product. The plan now explicitly

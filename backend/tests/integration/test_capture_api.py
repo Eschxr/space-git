@@ -168,6 +168,9 @@ def test_concurrent_schedule_and_queue_outage(api):
 def test_storage_failure_and_real_mode_do_not_fallback(api):
     result = capture(api)
     api.services.settings.vision_provider = "real"
+    api.services.settings.vision = api.services.settings.vision.model_copy(
+        update={"yoloe_checkpoint": None}
+    )
     response = api.client.post(f"/api/v1/captures/{result['id']}/process", json={})
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "model_unavailable"
@@ -426,7 +429,7 @@ def test_camera_tracks_miss_reappear_and_reference_validation(api):
     )
 
 
-def sequence_capture(api, env_id, *, moved=False, empty=False, added=False):
+def sequence_capture(api, env_id, *, moved=False, empty=False, added=False, captured_at=None):
     import json
 
     from PIL import PngImagePlugin
@@ -454,7 +457,11 @@ def sequence_capture(api, env_id, *, moved=False, empty=False, added=False):
             image.save(stream, format="PNG", pnginfo=metadata)
             data = stream.getvalue()
         images.append((str(camera), (f"{camera}.png", data, "image/png")))
-    response = api.client.post(f"/api/v1/environments/{env_id}/captures", files=images)
+    response = api.client.post(
+        f"/api/v1/environments/{env_id}/captures",
+        files=images,
+        data={"captured_at": captured_at} if captured_at else {},
+    )
     assert response.status_code == 201, response.text
     uploaded = response.json()
     response = api.client.post(f"/api/v1/captures/{uploaded['id']}/process", json={})
@@ -712,7 +719,11 @@ def test_full_fake_refactor_e2e(api, tmp_path):
 
     def without_urls(value):
         if isinstance(value, dict):
-            return {k: without_urls(v) for k, v in value.items() if not k.endswith("_url")}
+            return {
+                k: without_urls(v)
+                for k, v in value.items()
+                if k != "url" and not k.endswith("_url")
+            }
         if isinstance(value, list):
             return [without_urls(v) for v in value]
         return value
@@ -823,3 +834,456 @@ def test_phase5_prototype_survives_missing_embedding_and_persists_diagnostics(ap
     again = api.client.post(f"/api/v1/captures/{second['id']}/process", json={}).json()
     assert again["id"] == run2["id"]
     assert len(api.client.get(history_path).json()["items"]) == 3
+
+
+def drain_vision(api):
+    api.services.dispatcher.drain(
+        lambda job, run: execute_vision(
+            api.services.repository,
+            UUID(job),
+            UUID(run),
+            store_factory=api.services.store_factory,
+        )
+    )
+
+
+def test_phase6_discovery_and_reference_policy(api):
+    env_id = str(api.services.repository.create_environment("workflow")["id"])
+    initial, run, changes = sequence_capture(api, env_id)
+    workflow_path = f"/api/v1/captures/{initial['id']}/workflow"
+    workflow = api.client.get(workflow_path).json()
+    assert workflow["outcome"] == "pending_review"
+    assert len(workflow["source_images"]) == 4
+    assert len(workflow["observed_tracks"]) == 8
+    assert workflow["latest_run"]["reference"]["kind"] == "initial"
+    revision, _ = approve_revision(api, env_id, initial, changes, "initial")
+    assert api.client.get(workflow_path).json()["outcome"] == "committed"
+
+    unapproved, _, _ = sequence_capture(api, env_id, moved=True)
+    unchanged, same, no_changes = sequence_capture(api, env_id)
+    assert not no_changes
+    assert same["model_manifest"]["config"]["reference"]["revision_id"] == revision["id"]
+    assert (
+        api.client.get(f"/api/v1/captures/{unchanged['id']}/workflow").json()["outcome"]
+        == "no_changes"
+    )
+
+    rerun = api.client.post(f"/api/v1/captures/{initial['id']}/process", json={}).json()
+    assert rerun["id"] != run["id"]
+    drain_vision(api)
+    assert api.client.get(workflow_path).json()["outcome"] == "inspection_only"
+    attempts = api.client.get(f"/api/v1/captures/{initial['id']}/processing-runs").json()["items"]
+    assert [attempt["id"] for attempt in attempts] == [rerun["id"], run["id"]]
+    assert attempts[0]["reference"]["inspection_reason"] == "approved_capture_rerun"
+    assert attempts[1]["committed_revision_ids"] == [revision["id"]]
+
+    debug = api.client.post(
+        f"/api/v1/captures/{unapproved['id']}/process",
+        json={"reference_capture_id": initial["id"]},
+    ).json()
+    drain_vision(api)
+    assert (
+        debug["model_manifest"]["config"]["reference"]["inspection_reason"] == "explicit_reference"
+    )
+    backdated, _, proposals = sequence_capture(
+        api,
+        env_id,
+        captured_at="2000-01-01T00:00:00Z",
+    )
+    assert (
+        api.client.get(f"/api/v1/captures/{backdated['id']}/workflow").json()["outcome"]
+        == "inspection_only"
+    )
+    for item in proposals:
+        api.client.post(
+            f"/api/v1/change-proposals/{item['id']}/decision", json={"status": "accepted"}
+        )
+    response = api.client.post(
+        f"/api/v1/environments/{env_id}/revisions",
+        json={
+            "capture_id": backdated["id"],
+            "proposal_ids": [p["id"] for p in proposals],
+            "idempotency_key": "backdated",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "inspection_only"
+
+
+def test_phase7_review_audit_idempotency_and_database_protection(api):
+    from sqlalchemy import delete, update
+    from sqlalchemy.exc import DBAPIError
+
+    from scene_tracker.infrastructure.db.models import review_decisions
+
+    env_id = str(api.services.repository.create_environment("audit")["id"])
+    uploaded, _, proposals = sequence_capture(api, env_id)
+    proposal = proposals[0]
+    path = f"/api/v1/change-proposals/{proposal['id']}"
+    with api.engine.connect() as conn:
+        from scene_tracker.infrastructure.db.models import change_proposals
+
+        original = dict(
+            conn.execute(
+                select(change_proposals).where(
+                    change_proposals.c.id == UUID(proposal["id"]),
+                )
+            )
+            .mappings()
+            .one()
+        )
+    first = {
+        "status": "accepted",
+        "reason": "visible",
+        "reviewer": "Alice",
+        "idempotency_key": "one",
+    }
+    a = api.client.post(path + "/decision", json=first)
+    assert a.status_code == 200
+    assert (
+        api.client.post(path + "/decision", json=first).json()["decision"] == a.json()["decision"]
+    )
+    assert (
+        api.client.post(path + "/decision", json=first | {"reason": "different"}).status_code == 409
+    )
+    for status in ("rejected", "needs_review"):
+        body = {"status": status, "reason": status, "reviewer": "Bob"}
+        assert api.client.post(path + "/decision", json=body).status_code == 200
+        assert api.client.post(path + "/decision", json=body).status_code == 200
+    history = api.client.get(path + "/decisions").json()
+    assert [row["previous_status"] for row in history["items"]] == [
+        "proposed",
+        "accepted",
+        "rejected",
+    ]
+    assert [row["new_status"] for row in history["items"]] == [
+        "accepted",
+        "rejected",
+        "needs_review",
+    ]
+    assert history["current_status"] == "needs_review"
+    # Retrying an earlier decision does not reverse the newer decision.
+    assert api.client.post(path + "/decision", json=first).json()["status"] == "needs_review"
+    revision, _ = approve_revision(api, env_id, uploaded, [proposal], "selected")
+    evidence = api.client.get(f"/api/v1/revisions/{revision['id']}/evidence").json()
+    assert evidence["changes"][0]["review_decision"]["new_status"] == "accepted"
+    assert api.client.post(path + "/decision", json={"status": "rejected"}).status_code == 409
+    current = api.services.repository.run(UUID(proposal["run_id"]))
+    changes = api.client.get(f"/api/v1/processing-runs/{current['id']}/changes").json()["items"]
+    stored = next(item for item in changes if item["id"] == proposal["id"])
+    with api.engine.connect() as conn:
+        current = dict(
+            conn.execute(
+                select(change_proposals).where(
+                    change_proposals.c.id == UUID(proposal["id"]),
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert {k: current[k] for k in ("before_ref", "after_ref", "evidence")} == {
+        k: original[k] for k in ("before_ref", "after_ref", "evidence")
+    }
+    assert stored["status"] == "accepted"
+    for statement in (update(review_decisions).values(reason="rewrite"), delete(review_decisions)):
+        with pytest.raises(DBAPIError, match="immutable"):
+            with api.engine.begin() as conn:
+                conn.execute(statement)
+    assert api.client.post(path + "/decision", json={"status": "proposed"}).status_code == 422
+
+
+def test_phase8_multi_revision_image_history_and_endpoint_comparison(api):
+    import hashlib
+    from urllib.request import urlopen
+
+    env_id = str(api.services.repository.create_environment("full history")["id"])
+    first, _, changes = sequence_capture(api, env_id)
+    r1, _ = approve_revision(api, env_id, first, changes, "baseline")
+    original = api.client.get(f"/api/v1/revisions/{r1['id']}").json()
+    unchanged, _, no_changes = sequence_capture(api, env_id)
+    assert no_changes == []
+    assert (
+        api.client.get(f"/api/v1/captures/{unchanged['id']}/workflow").json()["outcome"]
+        == "no_changes"
+    )
+    moved, _, changes = sequence_capture(api, env_id, moved=True, added=True)
+    reject = next(p for p in changes if p["type"] == "moved_in_view" and p["camera_id"] == "cam_01")
+    api.client.post(
+        f"/api/v1/change-proposals/{reject['id']}/decision", json={"status": "rejected"}
+    )
+    r2, _ = approve_revision(
+        api, env_id, moved, [p for p in changes if p["id"] != reject["id"]], "partial"
+    )
+    assert r2["parent_id"] == r1["id"]
+    evidence_path = f"/api/v1/revisions/{r2['id']}/evidence"
+    result = api.client.get(evidence_path)
+    assert result.status_code == 200, result.text
+    evidence = result.json()
+    assert evidence["provenance"]["origin"] == "commit_snapshot"
+    assert len(evidence["source_images"]) == 4
+    assert len(evidence["approved_tracks"]) == 12
+    retained = next(
+        t for t in evidence["approved_tracks"] if t["view_track_id"] == reject["view_track_id"]
+    )
+    assert retained["observation"]["capture_id"] == first["id"]
+    assert all(image["capture_id"] == moved["id"] for image in evidence["source_images"])
+    assert retained["observation"]["overlays"]
+    assert len(evidence["highlight_paths"]) == 8
+    for frame in evidence["source_images"]:
+        with urlopen(frame["image"]["url"], timeout=10) as response:
+            assert hashlib.sha256(response.read()).hexdigest() == frame["sha256"]
+    for asset in (
+        retained["observation"]["mask"],
+        retained["observation"]["crop"],
+        *retained["observation"]["overlays"],
+    ):
+        with urlopen(asset["url"], timeout=10) as response:
+            assert hashlib.sha256(response.read()).hexdigest() == asset["sha256"]
+    rejected_history = api.client.get(
+        f"/api/v1/view-tracks/{reject['view_track_id']}/revisions"
+    ).json()
+    assert [item["revision"]["id"] for item in rejected_history["items"]] == [r1["id"]]
+
+    absent, _, missing = sequence_capture(api, env_id, empty=True)
+    r3, _ = approve_revision(api, env_id, absent, missing, "missing")
+    absent2, _, missing2 = sequence_capture(api, env_id, empty=True)
+    assert all(p["evidence"]["state"]["missing_count"] == 2 for p in missing2)
+    r4, _ = approve_revision(api, env_id, absent2, missing2, "still-missing")
+    restored, _, proposals = sequence_capture(api, env_id, added=True)
+    assert {p["type"] for p in proposals} == {"reappeared"}
+    r5, _ = approve_revision(api, env_id, restored, proposals, "restored")
+    assert [r3["parent_id"], r4["parent_id"], r5["parent_id"]] == [r2["id"], r3["id"], r4["id"]]
+    compare = api.client.get(
+        f"/api/v1/revisions/{r5['id']}/compare",
+        params={"from_revision_id": r1["id"]},
+    ).json()
+    # Intermediate movement and missing events cancel at the endpoints.
+    assert compare["direction"] == "forward"
+    assert sum(item["kind"] == "unchanged" for item in compare["items"]) == 8
+    assert sum(item["kind"] == "added" for item in compare["items"]) == 4
+    event_log = api.client.get(
+        f"/api/v1/revisions/{r5['id']}/diff",
+        params={"from_revision_id": r1["id"]},
+    ).json()["changes"]
+    assert {e["type"] for e in event_log} == {
+        "moved_in_view",
+        "appeared_in_view",
+        "missing_from_view",
+        "reappeared",
+    }
+    reverse = api.client.get(
+        f"/api/v1/revisions/{r1['id']}/compare",
+        params={"from_revision_id": r5["id"]},
+    ).json()
+    assert reverse["direction"] == "reverse"
+    assert sum(item["kind"] == "removed" for item in reverse["items"]) == 4
+    identical = api.client.get(
+        f"/api/v1/revisions/{r5['id']}/compare",
+        params={"from_revision_id": r5["id"]},
+    ).json()
+    assert {item["kind"] for item in identical["items"]} == {"unchanged"}
+    assert api.client.get(f"/api/v1/revisions/{r1['id']}").json() == original
+    assert api.client.get(evidence_path).json()["provenance"] == evidence["provenance"]
+    history = api.client.get(f"/api/v1/view-tracks/{reject['view_track_id']}/revisions").json()
+    assert [r["revision"]["id"] for r in history["items"]] == [
+        r1["id"],
+        r3["id"],
+        r4["id"],
+        r5["id"],
+    ]
+    assert history["items"][-1]["before"]["state"]["status"] == "unobserved"
+
+
+def test_phase8_competing_new_commits_and_stale_run_reprocessing(api):
+    env_id = str(api.services.repository.create_environment("race")["id"])
+    first, _, proposals = sequence_capture(api, env_id)
+    baseline, _ = approve_revision(api, env_id, first, proposals, "base")
+    a, run_a, proposals_a = sequence_capture(api, env_id, moved=True)
+    b, _, proposals_b = sequence_capture(api, env_id, added=True)
+    for item in proposals_a + proposals_b:
+        api.client.post(
+            f"/api/v1/change-proposals/{item['id']}/decision", json={"status": "accepted"}
+        )
+    bodies = [
+        {
+            "capture_id": cap["id"],
+            "proposal_ids": [p["id"] for p in proposals],
+            "idempotency_key": cap["id"],
+        }
+        for cap, proposals in ((a, proposals_a), (b, proposals_b))
+    ]
+    path = f"/api/v1/environments/{env_id}/revisions"
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda body: api.client.post(path, json=body), bodies))
+    assert sorted(r.status_code for r in results) == [201, 409]
+    loser = next(index for index, r in enumerate(results) if r.status_code == 409)
+    assert results[loser].json()["error"]["code"] == "stale_baseline"
+    assert len(api.client.get(path).json()["items"]) == 2
+    stale_capture = (a, b)[loser]
+    assert (
+        api.client.get(f"/api/v1/captures/{stale_capture['id']}/workflow").json()["outcome"]
+        == "stale_baseline"
+    )
+    refreshed = api.client.post(f"/api/v1/captures/{stale_capture['id']}/process", json={})
+    assert refreshed.status_code == 202
+    assert refreshed.json()["id"] != (run_a["id"] if loser == 0 else proposals_b[0]["run_id"])
+    drain_vision(api)
+    assert api.client.get(f"/api/v1/revisions/{baseline['id']}").status_code == 200
+
+
+def test_phase8_cross_environment_invalid_selection_and_atomic_rollback(api, monkeypatch):
+    from sqlalchemy import event
+
+    from scene_tracker.infrastructure.db.models import revision_track_snapshots
+
+    env_id = str(api.services.repository.create_environment("atomic")["id"])
+    other_id = str(api.services.repository.create_environment("other")["id"])
+    cap, _, proposals = sequence_capture(api, env_id)
+    other, _, foreign = sequence_capture(api, other_id)
+    for p in proposals + foreign:
+        api.client.post(f"/api/v1/change-proposals/{p['id']}/decision", json={"status": "accepted"})
+    body = {
+        "capture_id": cap["id"],
+        "proposal_ids": [p["id"] for p in proposals],
+        "idempotency_key": "atomic",
+    }
+    path = f"/api/v1/environments/{env_id}/revisions"
+    for invalid in (
+        body | {"capture_id": other["id"]},
+        body | {"proposal_ids": [foreign[0]["id"]]},
+        body | {"proposal_ids": [str(uuid4())]},
+    ):
+        assert api.client.post(path, json=invalid).status_code == 422
+    assert api.client.get(path).json()["items"] == []
+
+    def fail_snapshot(conn, cursor, statement, params, context, executemany):
+        if statement.startswith("INSERT INTO revision_track_snapshots"):
+            raise RuntimeError("injected snapshot failure")
+
+    event.listen(api.engine, "before_cursor_execute", fail_snapshot)
+    try:
+        with pytest.raises(RuntimeError, match="snapshot failure"):
+            api.client.post(path, json=body)
+    finally:
+        event.remove(api.engine, "before_cursor_execute", fail_snapshot)
+    assert api.client.get(path).json()["items"] == []
+    with api.engine.connect() as conn:
+        assert conn.scalar(select(func.count()).select_from(revision_track_snapshots)) == 0
+    own_revision, _ = approve_revision(api, env_id, cap, proposals, "atomic")
+    other_revision, _ = approve_revision(api, other_id, other, foreign, "foreign")
+    assert (
+        api.client.get(
+            f"/api/v1/revisions/{own_revision['id']}/compare",
+            params={"from_revision_id": other_revision["id"]},
+        ).status_code
+        == 422
+    )
+
+
+def test_phase6_queued_reference_survives_head_advance(api):
+    from scene_tracker.vision.contracts import ProcessingManifest
+
+    env_id = str(api.services.repository.create_environment("queued baseline")["id"])
+    initial, _, initial_changes = sequence_capture(api, env_id)
+    r1, _ = approve_revision(api, env_id, initial, initial_changes, "initial")
+    changed, _, changes = sequence_capture(api, env_id, moved=True)
+    store = api.services.store_factory(UUID(env_id))
+    queued_capture = api.client.post(
+        f"/api/v1/environments/{env_id}/captures",
+        files=[
+            (
+                frame["camera_id"],
+                (
+                    frame["camera_id"] + ".png",
+                    store.get(store.stat(frame["storage_key"])),
+                    "image/png",
+                ),
+            )
+            for frame in initial["frames"]
+        ],
+    ).json()
+    queued = api.client.post(
+        f"/api/v1/captures/{queued_capture['id']}/process",
+        json={},
+    ).json()
+    r2, _ = approve_revision(api, env_id, changed, changes, "advance")
+    drain_vision(api)
+    actual = api.services.repository.run(UUID(queued["id"]))
+    assert actual["status"] == "succeeded"
+    assert ProcessingManifest.model_validate(actual["model_manifest"]).scheduled_at is not None
+    assert actual["model_manifest"]["reference"]["revision_id"] == r1["id"]
+    workflow = api.client.get(f"/api/v1/captures/{queued_capture['id']}/workflow").json()
+    assert workflow["approved_revision_id"] == r2["id"]
+    assert workflow["outcome"] == "stale_baseline"
+    assert workflow["latest_run"]["reference"]["revision_id"] == r1["id"]
+
+
+def test_phase7_accepting_uncertain_preserves_snapshot_and_missing_evidence(api, monkeypatch):
+    from scene_tracker.application.vision_pipeline import process_fake
+
+    env_id = str(api.services.repository.create_environment("uncertain review")["id"])
+    initial, _, initial_changes = sequence_capture(api, env_id)
+    approve_revision(api, env_id, initial, initial_changes, "initial")
+    store = api.services.store_factory(UUID(env_id))
+    uploaded = api.client.post(
+        f"/api/v1/environments/{env_id}/captures",
+        files=[
+            (
+                frame["camera_id"],
+                (
+                    frame["camera_id"] + ".png",
+                    store.get(store.stat(frame["storage_key"])),
+                    "image/png",
+                ),
+            )
+            for frame in initial["frames"]
+        ],
+    ).json()
+    run = api.client.post(f"/api/v1/captures/{uploaded['id']}/process", json={}).json()
+
+    class Maskless(FakeExtractor):
+        def extract(self, image, config):
+            boxes, _ = super().extract(image, config)
+            return boxes, []
+
+    api.services.dispatcher.drain(
+        lambda job, run_id: execute_vision(
+            api.services.repository,
+            UUID(job),
+            UUID(run_id),
+            stage=lambda r, c: process_fake(
+                api.services.repository, r, c, store, extractor=Maskless()
+            ),
+        )
+    )
+    changes = api.client.get(f"/api/v1/processing-runs/{run['id']}/changes").json()["items"]
+    assert {item["type"] for item in changes} == {"uncertain"}
+    revision, _ = approve_revision(api, env_id, uploaded, changes, "uncertain")
+    snapshot = api.client.get(f"/api/v1/revisions/{revision['id']}").json()
+    assert all(track["uncertain"] for track in snapshot["tracks"])
+    assert all(track["observation"]["mask_key"] is None for track in snapshot["tracks"])
+
+    source_key = uploaded["frames"][0]["storage_key"]
+    original_factory = api.services.store_factory
+
+    class MissingSource:
+        def __init__(self, base):
+            self.base = base
+
+        def stat(self, key):
+            if key == source_key:
+                raise FileNotFoundError(key)
+            return self.base.stat(key)
+
+        def presign(self, blob):
+            return self.base.presign(blob)
+
+    monkeypatch.setattr(
+        api.services, "store_factory", lambda env: MissingSource(original_factory(env))
+    )
+    result = api.client.get(f"/api/v1/revisions/{revision['id']}/evidence")
+    assert result.status_code == 200, result.text
+    unavailable = result.json()["source_images"][0]["image"]
+    assert unavailable["sha256"] == uploaded["frames"][0]["sha256"]
+    assert unavailable["url"] is None and unavailable["unavailable_reason"] == "missing_blob"
+    assert api.client.get(f"/api/v1/revisions/{revision['id']}").json() == snapshot

@@ -129,7 +129,16 @@ uv run ruff format --check .
 uv run pytest -q
 ```
 
-Future outputs are one PLY per view, with explicit pixel-map transforms and no claim
-of cross-view alignment. No frontend, camera calibration/registration, OpenUSD,
-metric movement or fused 3D is implemented. To stop existing infrastructure while
-retaining volumes: `docker compose --env-file .env -f infra/compose.yaml stop`.
+Future outputs are one PLY per view, with explicit pixel-map transforms and independent
+camera coordinates. Capture/run discovery, auditable reviews, historical source images,
+accepted track history and endpoint comparisons are described in the
+[image-history HTTP workflow](docs/api.md#capture-workflow-and-processing-attempts).
+The independently developed `frontend/` uses its own edge API and metric scene model.
+Its future Scene Tracker adapter can consume the typed history/evidence contracts and
+per-source-image highlight manifests. Real PointDiT cloud delivery is Phase 9.
+To stop infrastructure while retaining volumes, run
+`docker compose --env-file .env -f infra/compose.yaml stop`.
+
+The pinned RQ SpawnWorker uses POSIX process APIs. Run durable workers on Linux.
+The Windows host supports the API and standalone CPU model smoke. The full service
+suite, including the spawned worker, is validated in Linux containers.

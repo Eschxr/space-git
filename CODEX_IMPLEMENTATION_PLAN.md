@@ -81,15 +81,15 @@ do not establish pixel correspondence. Emit one cloud per view; no alignment/fus
 | Phase | Current scope/status |
 |---|---|
 | 0 | Repository/uv/CPU boundaries completed |
-| 1 | Four-image contracts, immutable storage, initial SQL schema completed; additive migrations through 0005 |
+| 1 | Four-image contracts, immutable storage, initial SQL schema completed; additive migrations through 0006 |
 | 2 | Capture API and durable JSON/RQ jobs completed |
 | 3 | Fake contracts and inspectable artifacts completed |
-| 4 | Real YOLOE + DINOv2 adapters completed by R1–R2/R6; real runtime/quality still unvalidated |
+| 4 | Real YOLOE + DINOv2 adapters completed by R1–R2/R6; operator runtime/quality validation is separate from history gates |
 | R0–R6 | Refactor completed; see docs/refactor-status.md |
 | 5 | Consolidate camera-local permanence: explicit prototypes, complete cost/margin diagnostics and readable history; completed at this checkpoint |
-| 6 | Remaining: discoverable capture/run/review workflow and complete reference policy; original automatic cross-camera engine superseded |
-| 7 | Core proposals/review in R4; remaining: append-only review audit and complete decision/evidence semantics |
-| 8 | Core commits/snapshots/event diffs in R4; remaining: complete image/provenance responses, accepted track history, state comparison and acceptance gates |
+| 6 | Completed: capture attempts/workflow APIs, frozen references, explicit rerun/backdated/debug policies and no-change outcomes |
+| 7 | Completed: append-only review audit, idempotent decisions, uncertainty and missing/reappearance semantics |
+| 8 | Completed: immutable source/model/artifact provenance, image evidence, accepted track history, endpoint comparisons and lifecycle/transaction gates |
 | 9 | Real PointDiT integration deferred; separate future implementation/hardware/access gate |
 | 10 | Fake E2E/docs delivered by R6; real operational validation remains separate |
 
@@ -164,13 +164,15 @@ and Phase 5 assessment in `docs/implementation-status.md`. Update current progre
 Suggested commit: `feat: persist robust per-camera object tracks`.
 **Stop after Phase 5. Do not begin Phase 6 or Phase 9.**
 
-## Remaining Phase 6–8 — complete the image-based history system
+## Phase 6–8 — image-based history system
 
 R4 delivered core mechanics and a two-capture fake gate, not every original Phase 7/8
 requirement. The detailed source audit and requirement mapping are in
 [docs/phase8-gap-assessment.md](docs/phase8-gap-assessment.md). Preserve existing
 commit/snapshot APIs and complete these phases sequentially, only when requested.
-No runtime work on these phases was performed by the assessment.
+The assessment preceded implementation. These requirements are now completed and
+validated with 90 offline tests and 26 Linux PostgreSQL/Silo/Redis service tests.
+See implementation-status for results, local migration effects and platform limitations.
 
 ### Phase 6 — Capture/run/review workflow and reference policy
 

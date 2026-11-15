@@ -380,6 +380,8 @@ def process_pipeline(
     if model_provenance is not None:
         provenance.update(model_provenance)
     manifest = ProcessingManifest(
+        scheduled_at=run["model_manifest"].get("scheduled_at"),
+        reference=tracking["reference"] if tracking else None,
         provider=provider,
         inference_performed=provider == "real" and detector_called,
         scope="real_vision_pipeline" if provider == "real" else "synthetic_fixture_pipeline",

@@ -1,6 +1,7 @@
 import type {Change, Commit, Job, Scene} from '../../../../packages/protocol/types';
 import {api, apiBase, localHost} from '../components/connection';
 import type {Asset, CameraDevice, Capture, History, Rig, RigSettings} from './domain';
+import type {ProjectionMessage, ProjectionObject, ProjectionPlan} from './projection-objects';
 
 const segment = encodeURIComponent;
 const MAX_ASSET = 64 * 1024 * 1024;
@@ -21,6 +22,9 @@ export function edgeAdapter(token: string) {
     return blob;
   };
   return {
+    projectionModels: () => api<{models:string[];provider:'ollama'}>(token,'/projection/models'),
+    projectionChat: (model:string,prompt:string,objects:ProjectionObject[],messages:ProjectionMessage[]) =>
+      api<ProjectionPlan>(token,'/projection/chat',{model,prompt,objects,messages},'POST',135000),
     rig: () => api<Rig>(token,'/rig'),
     devices: () => api<{cameras: CameraDevice[]}>(token,'/devices'),
     saveRig: (settings: RigSettings) => api<Rig>(token,'/rig/settings',settings),

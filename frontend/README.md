@@ -13,6 +13,11 @@ After installing the Python edge dependencies, use
 `scripts/start.ps1 -Mode live -Port 3101 -EdgePort 8002` to start its web and camera services.
 Metric layouts, 3D viewers and projector tools remain available alongside image history.
 
+The [Project demo MVP](../docs/project-demo-mvp.md) adds an Ollama prompt panel,
+animated 3D additions, manual edits and undo. A live preview stays on the page
+while the separate projector window is open. It uses your installed Ollama models;
+quick-add controls also work without a model connection.
+
 ## New Worlds demo
 
 Run `pnpm install --frozen-lockfile` and `pnpm dev`, then open [SpaceGit](http://127.0.0.1:3000) and click **Start Demo**. The guided flow captures a simulated room, compares two commits, opens the scene in 3D, and projects an animated virtual office. Open [Project](http://127.0.0.1:3000/project) on your second monitor for fullscreen output and an alignment pattern.

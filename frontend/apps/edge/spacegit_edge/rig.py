@@ -21,6 +21,10 @@ from .store import new_id
 SLOTS = (1, 2, 3, 4)
 EXPORT_NAMES = {1: "01_radial_a.jpg", 2: "02_radial_b.jpg", 3: "03_radial_c.jpg", 4: "04_floor.jpg"}
 POINTDIT_OUTPUT = Path(r"\\wsl.localhost\Ubuntu\home\wilson\pointdit\generation\pretrained-pointditl-512-mixdata-nodinov3-240c1a4f\test_images")
+
+
+def pointdit_output():
+    return Path(os.environ.get("SPACEGIT_POINTDIT_OUTPUT_DIR") or POINTDIT_OUTPUT)
 DeviceIndex = Annotated[StrictInt, Field(ge=0, le=15)]
 Source = DeviceIndex | Literal["primary"] | None
 
@@ -179,7 +183,7 @@ def export_frames(directory, frames):
 
 
 def generate_pointdit(log_path):
-    outputs = [POINTDIT_OUTPUT / (Path(name).stem + "_pointcloud.ply") for name in EXPORT_NAMES.values()]
+    outputs = [pointdit_output() / (Path(name).stem + "_pointcloud.ply") for name in EXPORT_NAMES.values()]
     previous = {path: path.stat().st_mtime_ns if path.exists() else None for path in outputs}
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log:
@@ -245,7 +249,7 @@ def routes(authorize):
         if rt.pole.capture_lock.locked():
             raise HTTPException(409, "Wait for the current capture and PLY generation to finish")
         async with rt.pole.output_lock:
-            path = POINTDIT_OUTPUT / (Path(EXPORT_NAMES[slot]).stem + "_pointcloud.ply")
+            path = pointdit_output() / (Path(EXPORT_NAMES[slot]).stem + "_pointcloud.ply")
             try:
                 data = await asyncio.to_thread(path.read_bytes)
             except FileNotFoundError as error:

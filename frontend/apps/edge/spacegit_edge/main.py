@@ -33,6 +33,7 @@ from .markerless import ObjectTracker
 from .models import Branch, CalibrationInput, CalibrationSettings, CameraInput, Deploy, Diff, Id, JobInput, Merge, ObservationCommit, Pair, ProjectionInput, ProjectionSettings, Save, Scene, Strict, TrackInput, VisualTransform, WorkspaceInput
 from .navigation import Plan
 from .rig import PoleRig, routes as rig_routes
+from .projection_ai import routes as projection_routes
 from .quality import Timing, board_view, estimate_intrinsics, fingerprint, geometry_reason, physical_point, residuals, topology_id, view_signature
 from .store import ROOT, Store, compact, issues, new_id
 
@@ -1090,6 +1091,7 @@ def make_app(path=None, mode=None, token=None):
         return FileResponse(result,media_type=ARTIFACTS[name],filename=f"{asset[:8]}-{name}")
 
     app.include_router(rig_routes(authorize))
+    app.include_router(projection_routes(authorize))
     return app
 
 

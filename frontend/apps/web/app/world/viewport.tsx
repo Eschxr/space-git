@@ -1,6 +1,6 @@
 'use client';
 import {Canvas, useFrame, useThree} from '@react-three/fiber';
-import {Component, useEffect, useRef, type ReactNode, type RefObject} from 'react';
+import {Component, useEffect, useMemo, useRef, type ReactNode, type RefObject} from 'react';
 import {Box3, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, PointLight, Texture, Vector3, type Camera, type BufferGeometry, type Object3D} from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
@@ -9,6 +9,8 @@ import type {Card, Scene} from '../../../../packages/protocol/types';
 import {parseModel} from '../components/io';
 import {isNormalized, type Delta, type Projection} from './domain';
 import {Engine, type Agent} from './engine';
+import {ProjectionLayer, type ProjectionBounds} from './projection-layer';
+import type {ProjectionObject} from './projection-objects';
 
 type XYZ = [number,number,number];
 type Loaded = {geometry: BufferGeometry}|{model:Object3D}|{scene:Scene};
@@ -24,13 +26,19 @@ const fade = (time:number, start:number, end:number) => {
 };
 type RevealClock = RefObject<number>;
 
-export default function Viewport({office=false, scene, simulated=false, lowPower=false, angle='Portal', engine, agents=[], selected, select, diff=[], cloud=false, reset=0, asset, visible=true, reveal=0, reducedMotion=false, onReveal}:{
+export default function Viewport({office=false, scene, simulated=false, lowPower=false, angle='Portal', engine, agents=[], selected, select, diff=[], cloud=false, reset=0, asset, visible=true, reveal=0, reducedMotion=false, onReveal, additions=[], animationPlaying=true}:{
   office?:boolean; scene?:Scene; simulated?:boolean; lowPower?:boolean; angle?:Projection['angle'];
   engine?:RefObject<Engine|null>; agents?:Agent[]; selected?:string; select?:(id:string)=>void; diff?:Delta[];
   cloud?:boolean; reset?:number; asset?:Loaded|null; visible?:boolean;
   reveal?:number; reducedMotion?:boolean; onReveal?:(reveal:number)=>void;
+  additions?:ProjectionObject[]; animationPlaying?:boolean;
 }) {
   const current = asset && 'scene' in asset ? asset.scene : scene;
+  const bounds=useMemo<ProjectionBounds>(()=>{
+    const box=asset&&'model' in asset?new Box3().setFromObject(asset.model):asset&&'geometry' in asset?asset.geometry.boundingBox:null;
+    if(box&&!box.isEmpty())return {center:box.getCenter(new Vector3()).toArray(),radius:Math.max(.01,box.getSize(new Vector3()).length()*.35)};
+    return {center:[0,1.5,0],radius:office?3:2};
+  },[asset,office]);
   const fallback=<Fallback reveal={reveal} onReveal={onReveal}/>;
   return <RenderBoundary fallback={fallback}>
     <Canvas dpr={lowPower ? 1 : [1,1.5]} frameloop={visible?'always':'never'} shadows={!lowPower && office}
@@ -51,6 +59,7 @@ export default function Viewport({office=false, scene, simulated=false, lowPower
           <pointsMaterial size={.024} sizeAttenuation color={asset.geometry.hasAttribute('color')?'white':'#d6d6d6'} vertexColors={asset.geometry.hasAttribute('color')}/>
         </points>}
       </>}
+      <ProjectionLayer objects={additions} playing={animationPlaying&&!reducedMotion} bounds={bounds}/>
     </Canvas>
   </RenderBoundary>;
 }

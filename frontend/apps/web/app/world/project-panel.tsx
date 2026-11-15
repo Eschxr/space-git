@@ -4,23 +4,53 @@ import {useEffect,useRef,useState,type RefObject} from 'react';
 import type {Commit} from '../../../../packages/protocol/types';
 import {Icon} from '../components/icons';
 import {requestDisplayFullscreen,screenKey,useProjectorDisplays} from '../components/projector-displays';
-import {type Asset,type Projection} from './domain';
+import {CAMERAS,type Asset,type Projection} from './domain';
 import {ACTIONS, EXTRA_NAMES, AGENTS, Engine, STATUS, type Action, type Agent, type Target} from './engine';
 import type {Edge} from './edge';
 import {RenderScene,useSceneAsset} from './render-scene';
 import {ProjectorOutput,useProjectorWindow} from './projector-window';
 import {PortalOffice} from './portal-office';
+import {ProjectionAssistant} from './projection-assistant';
+import {ProjectorMirror} from './projector-mirror';
+import type {ProjectionObject} from './projection-objects';
 
 const targets:Record<Target,string>={desk_01:'Desk 01',desk_02:'Desk 02',desk_03:'Desk 03',archive:'Archive',door:'Door',meeting:'Meeting table'};
 export type ProjectAPI={present:()=>void;play:()=>void;office:()=>void};
-export function ProjectPanel({commit,edge,model,settings,changeSettings,projectRef,presenting,setPresenting,active=true}:{commit?:Commit;edge:Edge|null;model?:{remote:Asset|null;local:File|null};settings:Projection;changeSettings:(settings:Projection)=>void;
+export function ProjectPanel({commit,edge,connect,model,settings,changeSettings,projectRef,presenting,setPresenting,active=true,autoLoadReconstruction=true}:{commit?:Commit;edge:Edge|null;connect:()=>Promise<unknown>;model?:{remote:Asset|null;local:File|null};settings:Projection;changeSettings:(settings:Projection)=>void;autoLoadReconstruction?:boolean;
   projectRef:RefObject<ProjectAPI|null>;presenting:boolean;setPresenting:(on:boolean)=>void;active?:boolean}) {
   const engine=useRef<Engine|null>(null);
   const surface=useRef<HTMLDivElement>(null);
-  const [agents,setAgents]=useState<Agent[]>(AGENTS),[running,setRunning]=useState(false),[world,setWorld]=useState<'office'|'physical'>('office');
+  const [agents,setAgents]=useState<Agent[]>(AGENTS),[running,setRunning]=useState(false),[world,setWorld]=useState<'office'|'physical'>(model?.local||model?.remote?'physical':'office');
+  const [localScene,setLocalScene]=useState<File|null>(null);
+  const [source,setSource]=useState<'handoff'|'file'|'latest'>('handoff');
+  const [camera,setCamera]=useState(1),[sourceRefresh,setSourceRefresh]=useState(0),[sourceIssue,setSourceIssue]=useState('');
+  const autoLoaded=useRef(false);
+  const [objects,setObjects]=useState<ProjectionObject[]>([]),[undoStack,setUndoStack]=useState<ProjectionObject[][]>([]);
+  const [animationPlaying,setAnimationPlaying]=useState(true);
+  const changeObjects=(next:ProjectionObject[])=>{setUndoStack(stack=>[...stack,objects].slice(-40));setObjects(next);};
   const [pattern,setPattern]=useState(false),[message,setMessage]=useState(''),[statuses,setStatuses]=useState<Record<string,string>>({});
   const [agent,setAgent]=useState(AGENTS[0].id),[action,setAction]=useState<Action>('inspect'),[target,setTarget]=useState<Target>('archive');
-  const asset=useSceneAsset(edge,world==='physical'?model?.remote??null:null,world==='physical'?model?.local??null:null);
+  const asset=useSceneAsset(edge,world==='physical'&&source==='handoff'?model?.remote??null:null,
+    world==='physical'?(source==='file'?localScene:source==='handoff'?model?.local??null:null):null,
+    world==='physical'&&source==='latest'?camera:undefined,sourceRefresh);
+  const hasAssetSource=source==='latest'||source==='file'||!!(model?.local||model?.remote);
+  const sourceLabel=source==='latest'?`Latest reconstruction · cam_0${camera} · ${CAMERAS.find(view=>view.id===camera)?.name}`:
+    source==='file'?localScene?.name:model?.local?.name??model?.remote?.label;
+  useEffect(()=>{
+    if(!edge||!autoLoadReconstruction||autoLoaded.current)return;
+    let cancelled=false;
+    queueMicrotask(()=>{
+      if(cancelled)return;
+      autoLoaded.current=true;
+      if(model?.local||model?.remote||source!=='handoff')return;
+      setSource('latest');setWorld('physical');setPattern(false);
+    });
+    return ()=>{cancelled=true;};
+  },[edge,autoLoadReconstruction,model,source]);
+  const loadLatest=async()=>{
+    autoLoaded.current=true;setSourceIssue('');setSource('latest');setWorld('physical');setPattern(false);setSourceRefresh(value=>value+1);
+    if(!edge)try{await connect();}catch(error){setSourceIssue(error instanceof Error?error.message:'Could not connect to the edge.');}
+  };
   const [duration,setDuration]=useState(3000);
   const [pageVisible,setPageVisible]=useState(true);
   const [full,setFull]=useState(false);
@@ -109,13 +139,14 @@ export function ProjectPanel({commit,edge,model,settings,changeSettings,projectR
   };
   const image=<div className="nw-project-image" style={{filter:pattern?undefined:`brightness(${settings.brightness}%) contrast(${settings.contrast}%)`}}>
     {blackedOut&&<div className="nw-projector-blackout" aria-label="Output blacked out"/>}
-    {pattern?<Pattern/>:world==='office'?<PortalOffice engine={engine} agents={agents} angle={settings.angle} lowPower={settings.lowPower} reveal={reveal} outputWindow={projector.output?.window} visible={active&&(!!projector.output||pageVisible)}/>:
-      commit||asset.data?<RenderScene scene={commit?.scene} simulated={commit?.evidence?.mode==='demo'&&!asset.data} asset={asset.data} cloud={!!asset.data&&'geometry' in asset.data} lowPower={settings.lowPower} visible={active&&(!!projector.output||pageVisible)}/>:
+    {pattern?<Pattern/>:world==='office'?<PortalOffice engine={engine} agents={agents} additions={objects} animationPlaying={animationPlaying} angle={settings.angle} lowPower={settings.lowPower} reveal={reveal} outputWindow={projector.output?.window} visible={active&&(!!projector.output||pageVisible)}/>:
+      asset.error||(hasAssetSource&&!asset.data)?<div className="nw-render-note" role={asset.error?'alert':'status'}>{source==='latest'&&!edge?'Connect the local edge to load the current reconstruction.':asset.message||'Loading geometry…'}</div>:
+      commit||asset.data?<RenderScene scene={commit?.scene} additions={objects} animationPlaying={animationPlaying} simulated={commit?.evidence?.mode==='demo'&&!asset.data} asset={asset.data} cloud={!!asset.data&&'geometry' in asset.data} lowPower={settings.lowPower} visible={active&&(!!projector.output||pageVisible)}/>:
         <div className="nw-render-note">{asset.message||'Open a physical revision or model in Reconstruct to project it here.'}</div>}
   </div>;
   return <>
     <div className="nw-titlebar">
-      <div><div className="nw-eyebrow"><span/> 04 / PROJECTION</div><h1>Project</h1><p>Open a window into another world.</p></div>
+      <div><div className="nw-eyebrow"><span/> 04 / PROJECTION</div><h1>Project</h1><p>Your scene. A little imagination. A whole new world.</p></div>
       <div className="nw-actions">
         <button className="nw-btn" disabled={!!projector.output} onClick={()=>{setPresenting(true);surface.current?.focus({preventScroll:true});}}>Hide controls</button>
         <button className="nw-btn" disabled={!!projector.output} onClick={()=>projectRef.current?.present()}>Fullscreen</button>
@@ -124,7 +155,7 @@ export function ProjectPanel({commit,edge,model,settings,changeSettings,projectR
     </div>
     <div className="nw-workspace-grid nw-project-grid">
       <section className="nw-panel nw-view-panel">
-        <div className="nw-panel-head"><div><h2>{pattern?'Alignment pattern':world==='office'?'Office 01 · The other side':'Physical scene'}</h2><p>{pattern?'PROJECTOR TEST':world==='office'?'VIRTUAL ENVIRONMENT · LOCAL SIMULATION':commit?.evidence?.mode==='demo'?'SIMULATED RECONSTRUCTION':'SAVED SPATIAL REVISION'}</p></div>
+        <div className="nw-panel-head"><div><h2>{pattern?'Alignment pattern':world==='office'?'Office 01 · The other side':'Physical scene'}</h2><p>{pattern?'PROJECTOR TEST':world==='office'?'VIRTUAL ENVIRONMENT · LOCAL SIMULATION':asset.data?'IMPORTED SCENE · VIEWER COORDINATES':commit?.evidence?.mode==='demo'?'SIMULATED RECONSTRUCTION':'SAVED SPATIAL REVISION'}</p></div>
           <div className="nw-actions">
             <button className="nw-btn nw-tiny" aria-pressed={world==='office'&&!pattern} onClick={()=>{setWorld('office');setPattern(false);}}>Virtual office</button>
             <button className="nw-btn nw-tiny" aria-pressed={world==='physical'&&!pattern} onClick={()=>{setWorld('physical');setPattern(false);}}>Physical world</button>
@@ -132,18 +163,37 @@ export function ProjectPanel({commit,edge,model,settings,changeSettings,projectR
           </div>
         </div>
         <div className={'nw-output'+(presenting?' is-presenting':'')} ref={surface} tabIndex={-1} data-testid="projector-surface">
-          {projector.output ? <div className="nw-render-note">Output is on the projector window.</div> : image}
+          {projector.output&&!pattern ? <div className="nw-project-image" style={{filter:`brightness(${settings.brightness}%) contrast(${settings.contrast}%)`}}>
+            <ProjectorMirror root={projector.output.root} office={world==='office'}/>
+            {blackedOut&&<div className="nw-projector-blackout" aria-label="Output blacked out"/>}
+          </div> : image}
           {presenting&&<div className="nw-presentation-exit">
             {!full&&<button className="nw-btn nw-tiny" onClick={()=>projectRef.current?.present()}>Fullscreen</button>}
             <button className="nw-btn nw-tiny" onClick={exit}>Exit presentation</button>
           </div>}
         </div>
         <div className="nw-panel-foot">
-          <span>1920 × 1080 REFERENCE <b>·</b> 16:9</span>
+          <span>{projector.output?'LIVE PROJECTOR PREVIEW':'PROJECTOR PREVIEW'} <b>·</b> 16:9</span>
           <span><kbd>F</kbd> Fullscreen <kbd>W</kbd> World <kbd>G</kbd> Grid <kbd>B</kbd> Blackout <kbd>Space</kbd> Play</span>
+        </div>
+        <div className="nw-project-source">
+          <div className="nw-actions">
+            <label>Reconstruction view<select className="nw-field" value={camera} onChange={event=>{setCamera(+event.target.value);void loadLatest();}}>
+              {CAMERAS.map(view=><option key={view.id} value={view.id}>cam_0{view.id} · {view.name}{view.id===4?' · overhead':''}</option>)}
+            </select></label>
+            <button className="nw-btn nw-tiny" onClick={()=>void loadLatest()}>{edge?'Load current reconstruction':'Connect and load reconstruction'}</button>
+          </div>
+          <label>Open reconstructed scene<input type="file" accept=".ply,.glb,.gltf" onChange={event=>{const file=event.target.files?.[0];if(file){autoLoaded.current=true;setLocalScene(file);setSource('file');setSourceIssue('');setWorld('physical');setPattern(false);}event.target.value='';}}/></label>
+          <p>{sourceLabel??'Use the virtual office, a saved revision, or open your scene.'} · One source view at a time. Added objects use relative viewer positions.</p>
+          {sourceIssue&&<p role="alert">{sourceIssue}</p>}
+          {source==='latest'&&asset.error&&<p>Generate this view on the reconstruction laptop, set SPACEGIT_POINTDIT_OUTPUT_DIR on its edge service, then reload. You can also open its PLY file above.</p>}
+          {hasAssetSource&&<Link className="nw-fine" href="/world">Open reconstruction workspace</Link>}
         </div>
       </section>
       <div className="nw-side-stack">
+        <ProjectionAssistant edge={edge} connect={connect} objects={objects} change={changeObjects} canUndo={!!undoStack.length}
+          undo={()=>{const previous=undoStack.at(-1);if(previous){setObjects(previous);setUndoStack(stack=>stack.slice(0,-1));}}}
+          playing={animationPlaying} setPlaying={setAnimationPlaying} activate={()=>setPattern(false)}/>
         <section className="nw-panel">
           <div className="nw-panel-head"><h2>Projector display</h2><Icon name="screen"/></div>
           <div className="nw-display-controls">

@@ -12,6 +12,24 @@ TOKEN = "pole-test-only-operator-token-2026"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
+def test_existing_pointcloud_folder_is_configurable_without_generating_or_changing_files(tmp_path, monkeypatch):
+    output = tmp_path / "other-laptop-output"
+    output.mkdir()
+    original = b"ply\nexisting-camera-four-evidence\n"
+    cloud = output / "04_floor_pointcloud.ply"
+    cloud.write_bytes(original)
+    monkeypatch.setenv("SPACEGIT_POINTDIT_OUTPUT_DIR", str(output))
+    app = make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/rig/pointclouds/4").status_code == 401
+        result = client.get("/api/v1/rig/pointclouds/4", headers=AUTH)
+        assert result.status_code == 200
+        assert result.content == original
+        assert client.get("/api/v1/rig/pointclouds/1", headers=AUTH).status_code == 404
+    assert cloud.read_bytes() == original
+    assert list(output.iterdir()) == [cloud]
+
+
 def test_pointcloud_downloads_use_capture_roles_and_require_authorization(tmp_path, monkeypatch):
     output = tmp_path / "output"
     output.mkdir()

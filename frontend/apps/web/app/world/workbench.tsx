@@ -278,7 +278,7 @@ export default function World({projector=false}:{projector?:boolean}) {
         refresh={()=>void run('pull',refreshHistory)} reconstruct={()=>{setProjectScene(after);navigate('reconstruct');}} busy={busy}/>}
       {view==='reconstruct'&&<ReconstructPanel before={before} after={after} rows={compatible?rows:[]} edge={live?edge:null} jobs={jobs}
         refreshJobs={()=>void run('jobs',refreshJobs)} openProject={(commit,remote,local)=>{navigate('project');setProjectScene(commit);setProjectModel({remote,local});}}/>}
-      {(view==='project'||walkthrough&&walkthrough.step>=5)&&<div hidden={view!=='project'}><ProjectPanel commit={walkthrough?after:projectScene??after} edge={live?edge:null} model={walkthrough?undefined:projectModel} settings={projection}
+      {(view==='project'||walkthrough&&walkthrough.step>=5)&&<div hidden={view!=='project'}><ProjectPanel commit={walkthrough?after:projectScene??after} edge={edge} connect={connectLocal} model={walkthrough?undefined:projectModel} autoLoadReconstruction={!walkthrough} settings={projection}
         changeSettings={profile} projectRef={project} presenting={presenting} setPresenting={setPresenting} active={view==='project'}/></div>}
     </main>
     <footer className="nw-shell nw-footer"><span><Icon name="cube" size={14}/> SPACEGIT / DURHACK 2026</span><span>CAPTURE → VERSION CONTROL → RECONSTRUCT → PROJECT</span><Link href="/project" target="_blank" rel="noopener">Open projector window <Icon name="external" size={13}/></Link></footer>

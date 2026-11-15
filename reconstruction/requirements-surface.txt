@@ -1,0 +1,4 @@
+# CPU geometry processing, isolated from the camera and PointDiT environments.
+open3d==0.20.0
+numpy>=2,<3
+scipy>=1.14,<2

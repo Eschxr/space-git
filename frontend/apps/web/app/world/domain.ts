@@ -13,9 +13,14 @@ export type CameraDevice = {index: number; label: string};
 export type RigSettings = {sources: CameraSource[]; order: number[]};
 export type Feed = {id: number; status: 'live'|'waiting'|'offline'|'unmapped'|'simulated'; age_ms: number|null; error?: string|null};
 export type Rig = {mode: 'demo'|'live'; enabled: boolean; feeds: Feed[]; settings?: RigSettings};
-export type Capture = {id: string; created: number; mode: 'demo'|'live'; feeds: number[]; order?: number[]; sample?: number; head?: string; saved?: string; frame_times?: Record<string, number>; pointdit?: {status:'succeeded'|'failed'; files?:string[]; error?:string; log:string}};
+export type Capture = {id: string; created: number; mode: 'demo'|'live'; feeds: number[]; order?: number[]; sample?: number; head?: string; saved?: string; frame_times?: Record<string, number>; pointdit?: {status:'succeeded'|'failed'; files?:string[]; model_id?:string; error?:string; log:string}};
 export type History = {branches: Record<string, string>; commits: Commit[]};
 export type Asset = {id: string; name: string; label: string; job?: Job};
+export type RigModel = {id:string; capture_id:string|null; created:number; files:{slot:number;name:string;size:number;sha256:string}[]};
+export type ProjectedObject = {
+  id:string; name:string; prompt:string; placement:'left'|'center'|'right'; height:number; offset?:[number,number,number];
+  parts:{shape:'box'|'rounded-box'|'sphere'|'cylinder'|'cone'|'shade'; material?:'paint'|'wood'|'fabric'|'metal'; color:string; position:[number,number,number]; size:[number,number,number]; rotation:[number,number,number]}[];
+};
 export type Delta = {id: string; label: string; kind: 'added'|'missing'|'moved'|'unchanged'|'modified'; before?: Card; after?: Card; fields: string[]};
 export const DEMO_RIG: Rig = {mode: 'demo', enabled: false, feeds: CAMERAS.map(({id}) => ({id, status:'simulated', age_ms: null}))};
 
@@ -82,7 +87,7 @@ export function explainDiff(rows: Delta[], frame: Scene['frame']|null): string {
 
 export const DEMO_STEPS = [
   'Inspect the four feeds','Capture the initial state','Commit the initial state','Capture and commit a changed scene',
-  'Compare the revisions','Reconstruct the study','Open the virtual office','Activate projector view','Watch the office come alive',
+  'Compare the revisions','Reconstruct the study','Open the reconstructed study','Activate projector view',
 ] as const;
 
 export const DEFAULT_PROJECTION = {brightness:100,contrast:100,angle:'Portal' as 'Portal'|'Corner'|'Wide', lowPower:false};

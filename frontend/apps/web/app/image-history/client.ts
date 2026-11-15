@@ -18,6 +18,23 @@ export type RevisionEvidence = {revision: Revision; source_images: SourceImage[]
 export type Comparison = {direction: string; items: {view_track_id: string; camera_id: Camera; kind: string; fields: string[]; before: Track | null; after: Track | null}[]};
 export type TrackHistory = Page<{revision: Revision; state: Track; before: Track | null; changes: Proposal[]}>;
 export type Upload = {images: Record<Camera, Blob>; capturedAt?: string; frameTimes?: Partial<Record<Camera, string>>};
+export type CameraCommit = {id: string; environment_id: string; capture_id: string; source_session_id: string; message: string; parent_id: string|null; created_at: string; run: Run|null; processing_error: string|null};
+export type VisionStatus = {provider:'real'|'fake';detector:string;embedder:string;device:string;assets_verified:boolean;reason:string|null};
+export type Detection = {id:string;run_id:string;frame_id:string;camera_id:Camera;label:string;det_score:number;box_xyxy:number[];embedding_key:string|null;embedding_metadata:{dimension:number}|null};
+
+function uploadForm(upload: Upload) {
+  const form = new FormData();
+  for (const camera of CAMERAS) {
+    const blob = upload.images[camera];
+    const extension = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'}[blob?.type];
+    if (!blob || !extension) throw new Error(camera + ': choose a JPEG, PNG or WebP image.');
+    if (!blob.size || blob.size > 20 * 1024 * 1024) throw new Error(camera + ': image must be between 1 byte and 20 MiB.');
+    form.append(camera, blob, camera + '.' + extension);
+    if (upload.frameTimes?.[camera]) form.append(camera + '_captured_at', upload.frameTimes[camera]!);
+  }
+  if (upload.capturedAt) form.append('captured_at', upload.capturedAt);
+  return form;
+}
 
 export class TrackerError extends Error {
   status: number;
@@ -53,26 +70,33 @@ export function trackerClient(base: string, fetcher: typeof fetch = fetch) {
   const page = (offset = 0) => '?limit=50&offset=' + offset;
   return {
     base: origin,
+    visionStatus: (signal?:AbortSignal) => request<VisionStatus>('/vision/status',undefined,signal),
+    detections: async (run:string,signal?:AbortSignal) => {
+      const items:Detection[]=[];
+      for(let offset=0;;offset+=100) {
+        const next=await request<Page<Detection>>('/processing-runs/'+id(run)+'/detections?limit=100&offset='+offset,undefined,signal);
+        items.push(...next.items);
+        if(next.items.length<100)return items;
+      }
+    },
+    cameraCommits: (offset = 0, signal?: AbortSignal) => request<Page<CameraCommit>>('/camera-commits' + page(offset), undefined, signal),
+    pushCameraCommit: (source: string, message: string, upload: Upload) => {
+      const form = uploadForm(upload);
+      form.append('source_session_id', source);
+      form.append('message', message);
+      return request<CameraCommit>('/camera-commits', form);
+    },
     spaces: (offset = 0, signal?: AbortSignal) => request<Page<Space>>('/environments' + page(offset), undefined, signal),
     createSpace: (name: string) => request<Space>('/environments', {name}),
     captures: (space: string, offset = 0, signal?: AbortSignal) => request<Page<Capture>>('/environments/' + id(space) + '/captures' + page(offset), undefined, signal),
     revisions: (space: string, offset = 0, signal?: AbortSignal) => request<Page<Revision>>('/environments/' + id(space) + '/revisions' + page(offset), undefined, signal),
     upload: (space: string, upload: Upload) => {
-      const form = new FormData();
-      for (const camera of CAMERAS) {
-        const blob = upload.images[camera];
-        const extension = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'}[blob?.type];
-        if (!blob || !extension) throw new Error(camera + ': choose a JPEG, PNG or WebP image.');
-        if (!blob.size || blob.size > 20 * 1024 * 1024) throw new Error(camera + ': image must be between 1 byte and 20 MiB.');
-        form.append(camera, blob, camera + '.' + extension);
-        if (upload.frameTimes?.[camera]) form.append(camera + '_captured_at', upload.frameTimes[camera]!);
-      }
-      if (upload.capturedAt) form.append('captured_at', upload.capturedAt);
+      const form = uploadForm(upload);
       return request<Capture>('/environments/' + id(space) + '/captures', form);
     },
     workflow: (capture: string, signal?: AbortSignal) => request<Workflow>('/captures/' + id(capture) + '/workflow', undefined, signal),
     runs: (capture: string, offset = 0, signal?: AbortSignal) => request<Page<Run>>('/captures/' + id(capture) + '/processing-runs' + page(offset), undefined, signal),
-    process: (capture: string, retry = false) => request('/captures/' + id(capture) + '/process', {preset: 'default', retry}),
+    process: (capture: string, retry = false) => request<{id:string;status:string}>('/captures/' + id(capture) + '/process', {preset: 'default', retry}),
     changes: async (run: string, signal?: AbortSignal) => {
       const items: Proposal[] = [];
       for (let offset = 0; ; offset += 100) {
@@ -95,6 +119,23 @@ export type Tracker = ReturnType<typeof trackerClient>;
 /** Slot identity is fixed, regardless of the edge's presentation/capture order. */
 export function completeSession(session: {mode: string; feeds: number[]}) {
   return session.mode === 'live' && session.feeds.length === 4 && [1, 2, 3, 4].every(slot => session.feeds.includes(slot));
+}
+
+export async function rigSessionUpload(
+  session: {id:string;mode:string;feeds:number[];created:number;frame_times?:Record<string,number>},
+  preview:(slot:number,signal:AbortSignal,capture?:string)=>Promise<Blob>,
+  signal:AbortSignal,
+):Promise<Upload> {
+  if(!completeSession(session))throw new Error('Choose a complete live camera session.');
+  const blobs=await Promise.all(CAMERAS.map((_,index)=>preview(index+1,signal,session.id)));
+  const frameTimes=Object.fromEntries(CAMERAS.flatMap((camera,index)=>{
+    const stamp=session.frame_times?.[String(index+1)];
+    return stamp==null?[]:[[camera,new Date(stamp*1000).toISOString()]];
+  }));
+  return {
+    images:Object.fromEntries(CAMERAS.map((camera,index)=>[camera,blobs[index]])) as Record<Camera,Blob>,
+    capturedAt:new Date(session.created*1000).toISOString(),frameTimes,
+  };
 }
 
 export function intentKey(previous: {payload: string; key: string} | null, payload: unknown) {

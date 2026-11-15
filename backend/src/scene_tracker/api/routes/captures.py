@@ -71,21 +71,17 @@ def list_environments(
     }
 
 
-@router.post(
-    "/environments/{environment_id}/captures",
-    response_model=CaptureResponse,
-    status_code=201,
-    openapi_extra=MULTIPART,
-)
-async def upload_capture(environment_id: UUID, request: Request, services: ServicesDep):
+async def read_upload(request: Request, services, extra_fields=()):
     async with request.form(
-        max_files=4, max_fields=5, max_part_size=services.settings.max_image_bytes
+        max_files=4,
+        max_fields=5 + len(extra_fields),
+        max_part_size=services.settings.max_image_bytes,
     ) as form:
         keys = [key for key, _ in form.multi_items()]
         if (
             len(keys) != len(set(keys))
             or not set(ROLES).issubset(keys)
-            or set(keys) - set(ROLES + TIMESTAMPS + ["captured_at"])
+            or set(keys) - set(ROLES + TIMESTAMPS + ["captured_at", *extra_fields])
         ):
             raise AppError("invalid_capture", "Exactly four unique canonical files required", 422)
         timestamps = {}
@@ -112,13 +108,23 @@ async def upload_capture(environment_id: UUID, request: Request, services: Servi
                     timestamps.get(f"{camera}_captured_at"),
                 )
             )
-        service = CaptureService(services.repository, services.store_factory, services.settings)
-        return await run_in_threadpool(
-            service.ingest,
-            environment_id,
+        return (
             timestamps.get("captured_at", datetime.now(UTC)),
             uploads,
+            {key: form.get(key) for key in extra_fields},
         )
+
+
+@router.post(
+    "/environments/{environment_id}/captures",
+    response_model=CaptureResponse,
+    status_code=201,
+    openapi_extra=MULTIPART,
+)
+async def upload_capture(environment_id: UUID, request: Request, services: ServicesDep):
+    captured_at, uploads, _ = await read_upload(request, services)
+    service = CaptureService(services.repository, services.store_factory, services.settings)
+    return await run_in_threadpool(service.ingest, environment_id, captured_at, uploads)
 
 
 @router.get("/environments/{environment_id}/captures", response_model=CapturePage)

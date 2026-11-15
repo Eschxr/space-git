@@ -81,6 +81,7 @@ import * as THREE from 'three';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { bindProjectedObjectDrag, drawProjectedObjects } from './projector-objects.js';
 
 const $ = id => document.getElementById(id);
 const COLORS = [0xff5555, 0x55dd55, 0x5599ff, 0xffcc33];
@@ -107,6 +108,11 @@ const DEFAULTS = [
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#111111');
+const hemisphere = new THREE.HemisphereLight(0xffffff, 0x727272, 1.5);
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.1);
+keyLight.position.set(3, 8, 6);
+scene.add(hemisphere, keyLight);
+let surfaceStyle = {pointSize:1,pointOpacity:1,meshOpacity:1,colour:1,lighting:1,background:'#111111'};
 const view = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 1000);
 view.position.set(6, 5, 8);
 
@@ -183,7 +189,41 @@ function applyCam(c) {
 function applyCloud(c) {
   c.pivot.scale.setScalar(Math.pow(10, c.scaleExp));
   c.pivot.visible = c.showCloud;
-  if (c.points) c.points.material.size = c.baseSize * c.size;
+  for (const asset of [c.points, c.surface]) {
+    if (!asset) continue;
+    const material = asset.material;
+    if (asset.isPoints) {
+      material.size = c.baseSize * c.size * surfaceStyle.pointSize;
+      material.opacity = surfaceStyle.pointOpacity;
+    } else {
+      material.opacity = surfaceStyle.meshOpacity;
+      material.color.setScalar(surfaceStyle.colour);
+    }
+    material.transparent = material.opacity < 1;
+    material.depthWrite = !material.transparent;
+  }
+  if (c.points) c.points.visible = !c.surface;
+}
+
+function dropSurface(c) {
+  if (!c.surface) return;
+  c.surface.removeFromParent();
+  c.surface.geometry.dispose();
+  c.surface.material.dispose();
+  c.surface = null;
+  applyCloud(c);
+}
+
+function surfaceAsset(buffer, representation) {
+  const geometry = new PLYLoader().parse(buffer);
+  const vertexColors = geometry.hasAttribute('color');
+  if (representation === 'cleaned') return new THREE.Points(geometry, new THREE.PointsMaterial({vertexColors}));
+  if (!geometry.index?.count) {
+    geometry.dispose();
+    throw new Error('The reconstructed PLY is missing triangle indices.');
+  }
+  if (!geometry.hasAttribute('normal')) geometry.computeVertexNormals();
+  return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({vertexColors, roughness:.85, side:THREE.DoubleSide}));
 }
 
 function refreshUI() {
@@ -194,7 +234,9 @@ function refreshUI() {
   $('dnOn').checked = c.dn.on; $('dnRadius').value = c.dn.radius;
   $('dnMin').value = c.dn.minN; $('dnVoxel').value = c.dn.voxel;
   $('pipLabel').textContent = c.name + ' view';
-  $('info').textContent = c.points
+  $('info').textContent = c.surface?.isMesh ? `${c.name}: ${(c.surface.geometry.index.count/3).toLocaleString()} triangles`
+    : c.surface ? `${c.name}: ${c.surface.geometry.getAttribute('position').count.toLocaleString()} cleaned points`
+    : c.points
     ? `${c.name}: ${c.points.geometry.getAttribute('position').count.toLocaleString()} points`
     : `${c.name}: no PLY loaded`;
   if (editMode) tc.attach(c.rig);
@@ -312,8 +354,11 @@ function rebuildCloud(c) {
 }
 
 function loadPly(buffer, c = cams[sel]) {
+  const geometry = new PLYLoader().parse(buffer);
+  if (!geometry.getAttribute('position')?.count) { geometry.dispose(); throw new Error('This PLY has no vertices.'); }
+  dropSurface(c);
   if (c.src) c.src.dispose();
-  c.src = new PLYLoader().parse(buffer);
+  c.src = geometry;
   const P = c.src.getAttribute('position');
   c.R = robustRadius(P.array, P.count);
   c.baseSize = c.R * 0.004;
@@ -328,6 +373,7 @@ $('file').onchange = async e => {
 };
 $('clear').onclick = () => {
   const c = cams[sel];
+  dropSurface(c);
   if (c.points) { c.pivot.remove(c.points); c.points.geometry.dispose(); c.points.material.dispose(); c.points = null; }
   if (c.src) { c.src.dispose(); c.src = null; }
   refreshUI();
@@ -546,14 +592,121 @@ cams.forEach((c, i) => {
 refreshUI();
 
 // The parent supplies authenticated PLY bytes, keeping credentials outside the viewer.
+const projectionMode = new URLSearchParams(location.search).get('projection') === '1';
+const objectLayer = new THREE.Group();
+const foreground = view.position.clone().sub(orbit.target).multiplyScalar(.16).add(orbit.target);
+const objectAnchor = {x:foreground.x, y:0, z:foreground.z, scale:1};
+let generatedObjects = [];
+let editableObject;
+let single = false;
+if (projectionMode) {
+  setEdit(false);
+  $('editMode').checked = false;
+  $('pip').checked = false;
+  $('panel').hidden = true;
+  $('pipFrame').style.display = 'none';
+  grid.visible = false;
+  axes.visible = false;
+  cams.forEach(c => { c.helper.visible = false; c.box.visible = false; });
+  scene.add(objectLayer);
+  bindProjectedObjectDrag({canvas:renderer.domElement,camera:view,layer:objectLayer,
+    editable:()=>editableObject,pauseOrbit:paused=>{orbit.enabled=!paused;},
+    moved:(id,offset)=>parent.postMessage({type:'spacegit-object-moved',id,offset},location.origin)});
+}
 addEventListener('message', event => {
-  if (event.origin !== location.origin || event.source !== parent || event.data?.type !== 'spacegit-rig-clouds') return;
+  if (event.origin !== location.origin) return;
+  // React renders the projector popup from its opener, which sends the cloud bytes.
+  if (event.source !== parent && !(projectionMode && event.source === parent.opener)) return;
+  if (projectionMode && event.data?.type === 'spacegit-projected-objects') {
+    generatedObjects = event.data.objects;
+    editableObject = typeof event.data.editId === 'string' ? event.data.editId : undefined;
+    drawProjectedObjects(objectLayer, generatedObjects, objectAnchor);
+    document.body.dataset.projectedObjects = String(objectLayer.children.length);
+    return;
+  }
+  if (event.data?.type === 'spacegit-surface-style') {
+    surfaceStyle = event.data.style;
+    scene.background.set(surfaceStyle.background);
+    hemisphere.intensity = 1.5*surfaceStyle.lighting;
+    keyLight.intensity = 2.1*surfaceStyle.lighting;
+    cams.forEach(applyCloud);
+    return;
+  }
+  if (event.data?.type === 'spacegit-surface') {
+    const {representation,clouds} = event.data;
+    const assets = [];
+    try {
+      if (representation !== 'original') {
+        if (!['mesh','cleaned'].includes(representation) || clouds?.length !== (single?1:4)) throw new Error('Incomplete surface data.');
+        for (const cloud of clouds) assets.push(surfaceAsset(cloud, representation));
+      }
+      cams.forEach(dropSurface);
+      assets.forEach((asset,index)=>{
+        const camera = cams[index];
+        camera.surface = asset;
+        camera.pivot.add(asset);
+        applyCloud(camera);
+      });
+      document.body.dataset.surfaceView = representation;
+      refreshUI();
+      parent.postMessage({type:'spacegit-surface-loaded'}, location.origin);
+    } catch (error) {
+      assets.forEach(asset=>{asset.removeFromParent();asset.geometry.dispose();asset.material.dispose();});
+      cams.forEach(dropSurface);
+      document.body.dataset.surfaceView = 'original';
+      parent.postMessage({type:'spacegit-surface-error',message:error.message},location.origin);
+    }
+    return;
+  }
+  if (!projectionMode && event.data?.type === 'spacegit-rig-single') {
+    try {
+      const c = cams[0];
+      loadPly(event.data.cloud,c);
+      if (!single) {
+        single = true;
+        c.rig.position.set(0,0,0);c.rig.quaternion.identity();c.scaleExp=0;c.conv='';
+        applyConv(c);applyCloud(c);
+        c.name = 'Original scan';
+        c.src.computeBoundingSphere();
+        const {center,radius} = c.src.boundingSphere;
+        const zoom = Math.max(radius, .001);
+        view.position.copy(center).addScaledVector(new THREE.Vector3(1,.65,1),zoom*1.7);
+        view.near = zoom/1000;view.far = zoom*100;view.updateProjectionMatrix();
+        orbit.target.copy(center);orbit.update();
+        setEdit(false);
+        $('panel').hidden = true;
+        $('pip').checked = false;
+        $('pipFrame').style.display = 'none';
+      }
+      document.body.dataset.surfaceView = 'original';
+      parent.postMessage({type:'spacegit-rig-loaded',single:true},location.origin);
+    } catch (error) {
+      parent.postMessage({type:'spacegit-rig-error',message:error.message},location.origin);
+    }
+    return;
+  }
+  if (event.data?.type !== 'spacegit-rig-clouds') return;
   try {
     const clouds = event.data.clouds;
     if (!Array.isArray(clouds) || clouds.length !== 4 || clouds.some(buffer => !(buffer instanceof ArrayBuffer))) {
       throw new Error('Expected four camera point clouds');
     }
     clouds.forEach((buffer, i) => loadPly(buffer, cams[i]));
+    document.body.dataset.surfaceView = 'original';
+    if (projectionMode) {
+      const floor = cams[0].points;
+      const positions = floor.geometry.getAttribute('position');
+      const sample = new THREE.Vector3();
+      const heights = [];
+      floor.updateWorldMatrix(true, false);
+      for (let i=0; i<positions.count; i+=Math.max(1, Math.ceil(positions.count/256))) {
+        sample.fromBufferAttribute(positions, i).applyMatrix4(floor.matrixWorld);
+        if (Number.isFinite(sample.y)) heights.push(sample.y);
+      }
+      heights.sort((a, b) => a - b);
+      objectAnchor.y = heights[Math.floor(heights.length*.25)] ?? 0;
+      drawProjectedObjects(objectLayer, generatedObjects, objectAnchor);
+    }
     refreshUI();
     parent.postMessage({type: 'spacegit-rig-loaded', counts: cams.map(c => c.points.geometry.getAttribute('position').count)}, location.origin);
   } catch (error) {

@@ -6,9 +6,10 @@ import {Icon} from '../components/icons';
 import {localHost,useToken} from '../components/connection';
 import {CapturePanel} from './capture-panel';
 import {compareScenes,commitDemo,DEFAULT_PROJECTION,DEMO_RIG,DEMO_STEPS,demoCapture,EMPTY_HISTORY,readProjection,sameSceneReference,
-  type Asset,type Capture,type Delta,type History,type Projection,type Rig,type RigSettings} from './domain';
+  type Capture,type Delta,type History,type Projection,type Rig,type RigSettings} from './domain';
 import {edgeAdapter} from './edge';
 import {HistoryPanel} from './history-panel';
+import {CameraCommits} from './camera-commits';
 import {ProjectPanel,type ProjectAPI} from './project-panel';
 import {ReconstructPanel} from './reconstruct-panel';
 import './world.css';
@@ -23,8 +24,9 @@ type View=typeof VIEWS[number]['id'];
 type Workspace={captures:Capture[];history:History};
 const EMPTY:Workspace={captures:[],history:EMPTY_HISTORY};
 const KEY='spacegit.newworlds.workspace.v1';
-const BEATS:View[]=['capture','capture','versions','capture','versions','reconstruct','project','project','project'];
-const HOLD=[3300,2900,3100,3400,5400,5300,4900,3900,0];
+const BEATS:View[]=['capture','capture','versions','capture','versions','reconstruct','project','project'];
+const HOLD=[3300,2900,3100,3400,5400,5300,4900,0];
+const LAST_STEP=DEMO_STEPS.length-1;
 
 function readWorkspace():Workspace {
   try {const data=JSON.parse(localStorage.getItem(KEY)??'null');if(data&&Array.isArray(data.captures)&&Array.isArray(data.history?.commits)&&data.history.branches)return data;}
@@ -37,7 +39,8 @@ export default function World({projector=false}:{projector?:boolean}) {
   const [demo,setDemo]=useState<Workspace>(EMPTY),[loaded,setLoaded]=useState(false);
   const [rig,setRig]=useState<Rig>(DEMO_RIG),[liveHistory,setLiveHistory]=useState<History>(EMPTY_HISTORY),[liveCaptures,setLiveCaptures]=useState<Capture[]>([]);
   const [active,setActive]=useState<Capture|null>(null),[beforeId,setBefore]=useState(''),[afterId,setAfter]=useState(''),[projectScene,setProjectScene]=useState<Commit>();
-  const [projectModel,setProjectModel]=useState<{remote:Asset|null;local:File|null}>();
+  const [projectRig,setProjectRig]=useState(false);
+  const [versionMode,setVersionMode]=useState<'cameras'|'layouts'>('cameras');
   const [rows,setRows]=useState<Delta[]>([]),[diffStatus,setDiffStatus]=useState(''),[jobs,setJobs]=useState<Job[]>([]);
   const [busy,setBusy]=useState(''),[notice,setNotice]=useState(''),[error,setError]=useState('');
   const [addressLocal,setAddress]=useState(false),[edgeDown,setEdgeDown]=useState(false);
@@ -47,7 +50,7 @@ export default function World({projector=false}:{projector?:boolean}) {
   const [projection,setProjection]=useState<Projection>(DEFAULT_PROJECTION),[presenting,setPresenting]=useState(false);
   const project=useRef<ProjectAPI|null>(null);
   const [walkthrough,setWalkthrough]=useState<{step:number;auto:boolean;base:Capture;changed:Capture}|null>(null);
-  const live=!!edge&&rig.mode==='live'&&(mode==='live'||mode==='auto'&&rig.enabled);
+  const live=!!edge&&rig.mode==='live'&&(mode==='live'||mode==='auto');
   const history=live?liveHistory:demo.history, sessions=live?liveCaptures:demo.captures;
   const latest=history.commits.find(c=>c.id===history.branches.main)??history.commits[0];
   const before=history.commits.find(c=>c.id===beforeId),after=history.commits.find(c=>c.id===afterId)??latest;
@@ -122,8 +125,15 @@ export default function World({projector=false}:{projector?:boolean}) {
     catch(err){setError(err instanceof Error?err.message:'That operation failed. Please try again.');}
     finally{setBusy('');}
   };
-  const navigate=(next:View)=>{if(next==='project'){setProjectScene(after);setProjectModel(undefined);}setView(next);setWalkthrough(null);setNotice('');setError('');setPresenting(false);};
+  const navigate=(next:View)=>{
+    if(next==='project'){
+      setProjectScene(after);
+      if(view!=='project')setProjectRig(view==='reconstruct'&&!walkthrough);
+    }
+    setView(next);setWalkthrough(null);setNotice('');setError('');setPresenting(false);
+  };
   const switchSource=(useLive:boolean)=>{
+    setProjectRig(false);
     setMode(useLive?'live':'demo');setActive(null);setBefore('');setAfter('');setError('');setNotice('');setWalkthrough(null);
   };
   const connectCameras=()=>void run('connect',async()=>{
@@ -197,9 +207,8 @@ export default function World({projector=false}:{projector?:boolean}) {
       setAfter(capture.id);setBefore(step===3?base.id:'');
     }
     if(step===5)setAfter(changed.id);
-    if(step===6){project.current?.office();setPresenting(false);}
+    if(step===6)setPresenting(false);
     if(step===7)project.current?.present();
-    if(step===8)project.current?.play();
   },[]);
   const startDemo=useCallback(()=>{
     const base=demoCapture(0),changed=demoCapture(1);
@@ -207,7 +216,7 @@ export default function World({projector=false}:{projector?:boolean}) {
     setWalkthrough({step:0,auto:true,base,changed});showStep(0,base,changed);
   },[showStep]);
   useEffect(()=>{
-    if(!walkthrough?.auto || walkthrough.step===8)return;
+    if(!walkthrough?.auto || walkthrough.step===LAST_STEP)return;
     const {step,base,changed}=walkthrough;
     const timer=setTimeout(()=>{
       const next=step+1;showStep(next,base,changed);setWalkthrough({...walkthrough,step:next});
@@ -248,14 +257,14 @@ export default function World({projector=false}:{projector?:boolean}) {
     </nav></div>
     <main className="nw-shell nw-main">
       {walkthrough&&<section className="nw-guide" aria-label="Guided demo">
-        <div><div className="nw-eyebrow"><span/> GUIDED DEMO · {walkthrough.step+1} / 9</div><strong aria-live="polite">{DEMO_STEPS[walkthrough.step]}</strong></div>
+        <div><div className="nw-eyebrow"><span/> GUIDED DEMO · {walkthrough.step+1} / {DEMO_STEPS.length}</div><strong aria-live="polite">{DEMO_STEPS[walkthrough.step]}</strong></div>
         <div className="nw-segments" aria-hidden="true">{DEMO_STEPS.map((s,i)=><span key={s} className={i<=walkthrough.step?'done':''}/>)}</div>
         <div className="nw-actions">
-          {walkthrough.step<8&&<>
+          {walkthrough.step<LAST_STEP&&<>
             <button className="nw-btn nw-tiny" onClick={()=>setWalkthrough({...walkthrough,auto:!walkthrough.auto})}>{walkthrough.auto?'Pause demo':'Resume demo'}</button>
             <button className="nw-btn nw-tiny" onClick={()=>{const step=walkthrough.step+1;showStep(step,walkthrough.base,walkthrough.changed);setWalkthrough({...walkthrough,step});}}>Next stage <Icon name="arrow" size={13}/></button>
           </>}
-          <button className="nw-btn nw-tiny" onClick={()=>setWalkthrough(null)}>{walkthrough.step===8?'Dismiss':'End demo'}</button>
+          <button className="nw-btn nw-tiny" onClick={()=>setWalkthrough(null)}>{walkthrough.step===LAST_STEP?'Dismiss':'End demo'}</button>
         </div>
       </section>}
       {view!=='capture'&&edge&&!walkthrough&&<div className="nw-source"><label>Workspace <select className="nw-field" value={live?'live':'demo'} onChange={e=>switchSource(e.target.value==='live')}><option value="demo">Simulation</option><option value="live">Local edge</option></select></label></div>}
@@ -271,13 +280,18 @@ export default function World({projector=false}:{projector?:boolean}) {
           setRig(result);
           switchSource(true);
         })}/>}
-      {view==='versions'&&<HistoryPanel history={history} capture={active} source={live?'live':'demo'} latest={latest} before={before} after={after} rows={compatible?rows:[]} diffStatus={diffStatus}
+      {view==='versions'&&live&&<div className="nw-actions" style={{marginBottom:20}}>
+        <button className="nw-btn" aria-pressed={versionMode==='cameras'} onClick={()=>setVersionMode('cameras')}>Camera commits</button>
+        <button className="nw-btn" aria-pressed={versionMode==='layouts'} onClick={()=>setVersionMode('layouts')}>Layout revisions</button>
+      </div>}
+      {view==='versions'&&live&&versionMode==='cameras'&&<CameraCommits edge={edge} sessions={liveCaptures} active={active}/>}
+      {view==='versions'&&(!live||versionMode==='layouts')&&<HistoryPanel history={history} capture={active} source={live?'live':'demo'} latest={latest} before={before} after={after} rows={compatible?rows:[]} diffStatus={diffStatus}
         selectBefore={setBefore} selectAfter={setAfter} commit={commit} addBranch={addBranch}
         checkout={()=>{setProjectScene(after);navigate('reconstruct');setNotice('Checked out '+after!.id.slice(0,8)+' in the scene viewer.');}}
         refresh={()=>void run('pull',refreshHistory)} reconstruct={()=>{setProjectScene(after);navigate('reconstruct');}} busy={busy}/>}
-      {view==='reconstruct'&&<ReconstructPanel before={before} after={after} rows={compatible?rows:[]} edge={live?edge:null} jobs={jobs}
-        refreshJobs={()=>void run('jobs',refreshJobs)} openProject={(commit,remote,local)=>{navigate('project');setProjectScene(commit);setProjectModel({remote,local});}}/>}
-      {(view==='project'||walkthrough&&walkthrough.step>=5)&&<div hidden={view!=='project'}><ProjectPanel commit={walkthrough?after:projectScene??after} edge={live?edge:null} model={walkthrough?undefined:projectModel} settings={projection}
+      {view==='reconstruct'&&<ReconstructPanel demo={walkthrough?after:undefined} edge={live?edge:null} openProject={()=>navigate('project')}/>}
+      {(view==='project'||walkthrough&&walkthrough.step>=5)&&<div hidden={view!=='project'}><ProjectPanel commit={walkthrough?after:projectScene??after} edge={live?edge:null} chatEdge={edge} localChat={addressLocal} connectChat={connectLocal} forceRig={!walkthrough&&projectRig} jobs={live?jobs:undefined}
+        rigAvailable={!walkthrough&&live&&liveCaptures.some(item=>item.pointdit?.status==='succeeded')} settings={projection}
         changeSettings={profile} projectRef={project} presenting={presenting} setPresenting={setPresenting} active={view==='project'}/></div>}
     </main>
     <footer className="nw-shell nw-footer"><span><Icon name="cube" size={14}/> SPACEGIT / DURHACK 2026</span><span>CAPTURE → VERSION CONTROL → RECONSTRUCT → PROJECT</span><Link href="/project" target="_blank" rel="noopener">Open projector window <Icon name="external" size={13}/></Link></footer>

@@ -105,6 +105,25 @@ captures = model(
     ),
 )
 
+camera_commits = model(
+    "camera_commits",
+    scope(),
+    c("capture_id"),
+    c("source_session_id", String(200)),
+    c("message", String(2000)),
+    c("parent_id", Uuid, nullable=True),
+    c("request_hash", String(64)),
+    c("created_at", DateTime(timezone=True), server_default=func.now()),
+    constraints=(
+        unique_scope(),
+        fk("environment_id", "environments", scoped=False),
+        fk("capture_id", "captures"),
+        fk("parent_id", "camera_commits"),
+        UniqueConstraint("source_session_id"),
+        UniqueConstraint("capture_id"),
+    ),
+)
+
 frames = model(
     "frames",
     scope(),

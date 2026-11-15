@@ -59,6 +59,122 @@ def files():
     ]
 
 
+def test_camera_commit_push_preserves_images_and_deduplicates_concurrent_retries(api):
+    from scene_tracker.infrastructure.db.models import camera_commits, captures
+
+    data = {
+        "source_session_id": "saved-rig-session",
+        "message": "Record the desk",
+        "captured_at": "2026-11-15T10:00:00Z",
+        "cam_04_captured_at": "2026-11-15T10:00:01Z",
+    }
+    with ThreadPoolExecutor(4) as pool:
+        responses = list(
+            pool.map(
+                lambda _: api.client.post("/api/v1/camera-commits", data=data, files=files()),
+                range(4),
+            )
+        )
+    assert all(response.status_code == 201 for response in responses)
+    first = responses[0].json()
+    assert {response.json()["id"] for response in responses} == {first["id"]}
+    assert first["message"] == "Record the desk" and first["parent_id"] is None
+    assert first["run"]["status"] == "queued"
+    assert len(api.services.dispatcher.pending) == 1
+    with api.engine.connect() as conn:
+        assert conn.scalar(select(func.count()).select_from(camera_commits)) == 1
+        assert conn.scalar(select(func.count()).select_from(captures)) == 1
+    saved = api.client.get(f"/api/v1/captures/{first['capture_id']}").json()
+    assert [frame["camera_id"] for frame in saved["frames"]] == [f"cam_{i:02}" for i in range(1, 5)]
+    assert saved["frames"][-1]["captured_at"] == "2026-11-15T10:00:01Z"
+    for frame in saved["frames"]:
+        raw = files()[0][1][1]
+        blob = Blob(frame["storage_key"], frame["sha256"], frame["content_type"], len(raw))
+        assert api.services.store_factory(UUID(first["environment_id"])).get(blob) == raw
+    conflict = api.client.post(
+        "/api/v1/camera-commits", data=data | {"message": "Different"}, files=files()
+    )
+    assert conflict.status_code == 409
+    second = api.client.post(
+        "/api/v1/camera-commits",
+        data=data
+        | {
+            "source_session_id": "next-rig-session",
+            "message": "Move the mug",
+            "captured_at": "2026-11-15T10:05:00Z",
+        },
+        files=files(),
+    ).json()
+    assert second["parent_id"] == first["id"]
+    history = api.client.get("/api/v1/camera-commits?limit=1").json()
+    assert history["items"][0]["id"] == second["id"]
+    assert api.client.get("/api/v1/camera-commits?offset=1").json()["items"][0]["id"] == first["id"]
+
+
+def test_camera_commit_recovers_after_capture_saved_before_response(api, monkeypatch):
+    from scene_tracker.application.captures import CaptureService
+
+    original = CaptureService.ingest
+
+    def interrupted(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("connection interrupted after storage")
+
+    data = {
+        "source_session_id": "interrupted-session",
+        "message": "Saved room",
+        "captured_at": "2026-11-15T10:00:00Z",
+    }
+    monkeypatch.setattr(CaptureService, "ingest", interrupted)
+    with pytest.raises(RuntimeError, match="connection interrupted"):
+        api.client.post("/api/v1/camera-commits", data=data, files=files())
+    assert api.client.get("/api/v1/camera-commits").json()["items"] == []
+    monkeypatch.setattr(CaptureService, "ingest", original)
+    response = api.client.post("/api/v1/camera-commits", data=data, files=files())
+    assert response.status_code == 201
+    assert len(api.client.get("/api/v1/camera-commits").json()["items"]) == 1
+
+
+def test_camera_commit_persists_when_analysis_cannot_start(api):
+    api.services.settings.vision_provider = "real"
+    api.services.settings.vision = api.services.settings.vision.model_copy(
+        update={"yoloe_checkpoint": None}
+    )
+    data = {
+        "source_session_id": "missing-model-session",
+        "message": "Camera evidence",
+        "captured_at": "2026-11-15T10:00:00Z",
+    }
+    response = api.client.post("/api/v1/camera-commits", data=data, files=files())
+    assert response.status_code == 201
+    assert response.json()["processing_error"]
+    assert response.json()["run"] is None
+    assert len(api.client.get("/api/v1/camera-commits").json()["items"]) == 1
+    saved = api.client.get(f"/api/v1/captures/{response.json()['capture_id']}").json()
+    assert saved["status"] == "ready" and len(saved["frames"]) == 4
+    assert api.services.dispatcher.pending == {}
+
+
+def test_camera_commit_requires_complete_images_and_stable_timestamp(api):
+    data = {
+        "source_session_id": "incomplete-session",
+        "message": "Camera evidence",
+        "captured_at": "2026-11-15T10:00:00Z",
+    }
+    assert (
+        api.client.post("/api/v1/camera-commits", data=data, files=files()[:3]).status_code == 422
+    )
+    assert (
+        api.client.post(
+            "/api/v1/camera-commits",
+            data={"source_session_id": "no-time", "message": "Room"},
+            files=files(),
+        ).status_code
+        == 422
+    )
+    assert api.client.get("/api/v1/camera-commits").json()["items"] == []
+
+
 def capture(api):
     env = api.client.post("/api/v1/environments", json={"name": "room"})
     assert env.status_code == 201

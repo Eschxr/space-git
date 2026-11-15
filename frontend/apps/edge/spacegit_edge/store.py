@@ -43,6 +43,8 @@ class Store:
                 PRIMARY KEY(session,photo));
             CREATE TABLE IF NOT EXISTS pole_captures(id TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS pole_frames(capture TEXT NOT NULL REFERENCES pole_captures(id), slot INTEGER NOT NULL, jpeg BLOB NOT NULL, PRIMARY KEY(capture,slot));
+            CREATE TABLE IF NOT EXISTS projector_objects(scene TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
+                PRIMARY KEY(scene,id));
             CREATE TRIGGER IF NOT EXISTS immutable_commit_update BEFORE UPDATE ON commits BEGIN SELECT RAISE(ABORT,'Commit is immutable'); END;
             CREATE TRIGGER IF NOT EXISTS immutable_commit_delete BEFORE DELETE ON commits BEGIN SELECT RAISE(ABORT,'Commit is immutable'); END;
             """)

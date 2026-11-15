@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import DateTime, cast, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from scene_tracker.application.references import select_reference
 from scene_tracker.core.errors import AppError
@@ -60,18 +61,20 @@ class Repository:
                 ).mappings()
             ]
 
-    def begin_capture(self, environment_id, captured_at):
+    def begin_capture(self, environment_id, captured_at, capture_id=None):
         self.environment(environment_id)
-        capture_id = uuid4()
+        capture_id = capture_id or uuid4()
         with self.engine.begin() as conn:
             conn.execute(
-                insert(captures).values(
+                pg_insert(captures)
+                .values(
                     id=capture_id,
                     environment_id=environment_id,
                     captured_at=captured_at,
                     status="uploading",
                     warnings=[],
                 )
+                .on_conflict_do_nothing(index_elements=["id"])
             )
         return capture_id
 
@@ -88,6 +91,7 @@ class Repository:
                 .where(captures.c.id == capture.id)
                 .values(
                     status="ready",
+                    error=None,
                     source_manifest_hash=capture.source_manifest_hash,
                     warnings=list(capture.warnings),
                 )

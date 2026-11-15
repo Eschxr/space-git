@@ -8,8 +8,8 @@ class CaptureService:
         self.store_factory = store_factory
         self.settings = settings
 
-    def ingest(self, environment_id, captured_at, uploads):
-        capture_id = self.repository.begin_capture(environment_id, captured_at)
+    def ingest(self, environment_id, captured_at, uploads, capture_id=None):
+        capture_id = self.repository.begin_capture(environment_id, captured_at, capture_id)
         try:
             capture = ingest_capture(
                 environment_id,

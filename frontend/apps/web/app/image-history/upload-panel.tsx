@@ -3,7 +3,7 @@ import {useMemo, useState} from 'react';
 import {useToken} from '../components/connection';
 import {edgeAdapter} from '../world/edge';
 import type {Capture as RigCapture} from '../world/domain';
-import {CAMERAS, completeSession, type Camera, type Capture, type Tracker} from './client';
+import {CAMERAS, completeSession, rigSessionUpload, type Camera, type Capture, type Tracker} from './client';
 import {date, short} from './evidence';
 
 export default function UploadPanel({api, space, busy, run, uploaded}: {api: Tracker; space: string; busy: boolean; run: (label: string, action: () => Promise<void>) => void; uploaded: (capture: Capture) => Promise<void>}) {
@@ -41,9 +41,7 @@ export default function UploadPanel({api, space, busy, run, uploaded}: {api: Tra
         if (!session || !edge || !completeSession(session)) return;
         const controller = new AbortController();
         try {
-          const blobs = await Promise.all(CAMERAS.map((_, index) => edge.preview(index + 1, controller.signal, session.id)));
-          const frameTimes = Object.fromEntries(CAMERAS.flatMap((camera, index) => session.frame_times?.[String(index + 1)] ? [[camera, new Date(session.frame_times[String(index + 1)] * 1000).toISOString()]] : []));
-          await uploaded(await api.upload(space, {images: Object.fromEntries(CAMERAS.map((camera, index) => [camera, blobs[index]])) as Record<Camera, Blob>, capturedAt: new Date(session.created * 1000).toISOString(), frameTimes}));
+          await uploaded(await api.upload(space, await rigSessionUpload(session, edge.preview, controller.signal)));
         } finally {controller.abort();}
       })}>Import selected session</button>
     </details>

@@ -1,6 +1,32 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {CAMERAS, completeSession, intentKey, trackerClient, TrackerError} from '../../apps/web/app/image-history/client.ts';
+import {CAMERAS, completeSession, intentKey, rigSessionUpload, trackerClient, TrackerError} from '../../apps/web/app/image-history/client.ts';
+
+test('one-click camera commits transfer saved slot bytes and timestamps without file selection', async () => {
+  const session = {id:'saved-session',mode:'live',feeds:[4,2,1,3],created:1000,frame_times:{'1':999,'2':1000,'3':1001,'4':1002}};
+  const slots=[];
+  const upload=await rigSessionUpload(session,async(slot,signal,capture)=>{
+    assert.equal(capture,session.id);assert.equal(signal.aborted,false);slots.push(slot);
+    return new Blob([new Uint8Array([slot,99])],{type:'image/jpeg'});
+  },new AbortController().signal);
+  assert.deepEqual(slots,[1,2,3,4]);
+  let sent;
+  const api=trackerClient('http://127.0.0.1:8001',async(url,options)=>{
+    sent={url,options};return Response.json({id:'commit'});
+  });
+  await api.pushCameraCommit(session.id,'Move the mug',upload);
+  assert.equal(sent.url,'http://127.0.0.1:8001/api/v1/camera-commits');
+  const form=sent.options.body;
+  assert.equal(form.get('source_session_id'),session.id);
+  assert.equal(form.get('message'),'Move the mug');
+  assert.equal(form.get('captured_at'),new Date(1000000).toISOString());
+  for(const [index,camera] of CAMERAS.entries()) {
+    assert.deepEqual([...new Uint8Array(await form.get(camera).arrayBuffer())],[index+1,99]);
+    assert.equal(form.get(camera).name,camera+'.jpg');
+    assert.equal(form.get(camera+'_captured_at'),new Date(session.frame_times[String(index+1)]*1000).toISOString());
+  }
+  await assert.rejects(rigSessionUpload({...session,feeds:[1,2,3]},()=>{throw Error('Should not fetch');},new AbortController().signal),/complete live/);
+});
 
 test('upload preserves bytes and fixed camera roles with canonical filenames and timestamps', async () => {
   let sent;
@@ -53,4 +79,18 @@ test('change proposals are loaded across pages', async () => {
   });
   assert.equal((await api.changes('run')).length, 101);
   assert.deepEqual(offsets, [0, 100]);
+});
+
+test('detector results paginate and configuration stays explicit', async () => {
+  const offsets = [];
+  const api = trackerClient('http://127.0.0.1:8001', async url => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/vision/status')) return Response.json({provider:'real',assets_verified:false,reason:'missing checkpoint'});
+    assert.equal(parsed.pathname, '/api/v1/processing-runs/run/detections');
+    const offset = Number(parsed.searchParams.get('offset')); offsets.push(offset);
+    return Response.json({items:Array.from({length:offset?1:100},(_,i)=>({id:String(offset+i)})),offset,limit:100});
+  });
+  assert.equal((await api.detections('run')).length, 101);
+  assert.deepEqual(offsets, [0, 100]);
+  assert.deepEqual(await api.visionStatus(), {provider:'real',assets_verified:false,reason:'missing checkpoint'});
 });

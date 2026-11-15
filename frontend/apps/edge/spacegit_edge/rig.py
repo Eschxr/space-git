@@ -1,6 +1,7 @@
 """Independently acquire the four views on a single pole; no camera fusion."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import time
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import Field, StrictInt, model_validator
 
 from .camera import Camera
@@ -21,6 +22,7 @@ from .store import new_id
 SLOTS = (1, 2, 3, 4)
 EXPORT_NAMES = {1: "01_radial_a.jpg", 2: "02_radial_b.jpg", 3: "03_radial_c.jpg", 4: "04_floor.jpg"}
 POINTDIT_OUTPUT = Path(r"\\wsl.localhost\Ubuntu\home\wilson\pointdit\generation\pretrained-pointditl-512-mixdata-nodinov3-240c1a4f\test_images")
+MAX_CLOUD_BYTES = 64 * 1024 * 1024
 DeviceIndex = Annotated[StrictInt, Field(ge=0, le=15)]
 Source = DeviceIndex | Literal["primary"] | None
 
@@ -178,8 +180,65 @@ def export_frames(directory, frames):
         shutil.rmtree(backup)
 
 
+def cloud_name(slot):
+    return Path(EXPORT_NAMES[slot]).stem + "_pointcloud.ply"
+
+
+def archive_root(store):
+    return store.path.parent / (store.path.stem + "-pointdit-models")
+
+
+def archive_clouds(root, sources, *, capture=None, captured_at=None):
+    """Copy a complete, stable set before publishing any version."""
+    paths = [Path(path) for path in sources]
+    if [path.name for path in paths] != [cloud_name(slot) for slot in SLOTS]:
+        raise RuntimeError("Expected all four PointDiT files in capture order")
+
+    def signature(path):
+        stat = path.stat()
+        return stat.st_size, stat.st_mtime_ns
+
+    before = [signature(path) for path in paths]
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".model-", dir=root) as staging:
+        bundle = Path(staging) / "bundle"
+        bundle.mkdir()
+        files = []
+        for slot, path, (size, _) in zip(SLOTS, paths, before):
+            if not 0 < size <= MAX_CLOUD_BYTES:
+                raise RuntimeError(f"{path.name} exceeds the supported PLY size or is empty")
+            digest = hashlib.sha256()
+            with path.open("rb") as source, (bundle / path.name).open("wb") as target:
+                if source.readline(32).strip() != b"ply":
+                    raise RuntimeError(f"{path.name} is not a PLY file")
+                source.seek(0)
+                copied = 0
+                while chunk := source.read(1024 * 1024):
+                    copied += len(chunk)
+                    if copied > size:
+                        raise RuntimeError("PointDiT output changed while saving. Try again when generation completes.")
+                    digest.update(chunk)
+                    target.write(chunk)
+                if copied != size:
+                    raise RuntimeError("PointDiT output changed while saving. Try again when generation completes.")
+            files.append(dict(slot=slot, name=path.name, size=size, sha256=digest.hexdigest()))
+        if [signature(path) for path in paths] != before:
+            raise RuntimeError("PointDiT output changed while saving. Try again when generation completes.")
+
+        digest = hashlib.sha256("".join(file["sha256"] for file in files).encode("ascii")).hexdigest()
+        ident = capture or "import-" + digest[:24]
+        destination = root / ident
+        if destination.exists():
+            return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+        version = dict(id=ident, capture_id=capture, created=captured_at if captured_at is not None else max(
+            stamp for _, stamp in before) / 1_000_000_000, files=files)
+        (bundle / "manifest.json").write_text(json.dumps(version), encoding="utf-8")
+        bundle.rename(destination)
+        return version
+
+
 def generate_pointdit(log_path):
-    outputs = [POINTDIT_OUTPUT / (Path(name).stem + "_pointcloud.ply") for name in EXPORT_NAMES.values()]
+    outputs = [POINTDIT_OUTPUT / cloud_name(slot) for slot in SLOTS]
     previous = {path: path.stat().st_mtime_ns if path.exists() else None for path in outputs}
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log:
@@ -245,7 +304,7 @@ def routes(authorize):
         if rt.pole.capture_lock.locked():
             raise HTTPException(409, "Wait for the current capture and PLY generation to finish")
         async with rt.pole.output_lock:
-            path = POINTDIT_OUTPUT / (Path(EXPORT_NAMES[slot]).stem + "_pointcloud.ply")
+            path = POINTDIT_OUTPUT / cloud_name(slot)
             try:
                 data = await asyncio.to_thread(path.read_bytes)
             except FileNotFoundError as error:
@@ -253,6 +312,42 @@ def routes(authorize):
             except OSError as error:
                 raise HTTPException(503, "Could not read the WSL PointDiT output folder") from error
             return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+
+    @router.get("/models")
+    def models(rt=Depends(authorize)):
+        rt.pole.require_live()
+        versions = []
+        for manifest in archive_root(rt.store).glob("*/manifest.json"):
+            # Only published directories contain a manifest at this depth.
+            version = json.loads(manifest.read_text(encoding="utf-8"))
+            if all((manifest.parent / cloud_name(slot)).is_file() for slot in SLOTS):
+                versions.append(version)
+        return sorted(versions, key=lambda version: (version["created"], version["id"]), reverse=True)
+
+    @router.get("/models/{ident}/pointclouds/{slot}")
+    def archived_pointcloud(ident: Id, slot: int, rt=Depends(authorize)):
+        rt.pole.require_live()
+        folder = archive_root(rt.store) / ident
+        if slot not in SLOTS or not (folder / "manifest.json").is_file():
+            raise HTTPException(404, "Saved model or camera position not found")
+        path = folder / cloud_name(slot)
+        if not path.is_file():
+            raise HTTPException(404, "This saved point cloud is missing")
+        return FileResponse(path, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+
+    @router.post("/models/import-current", status_code=201)
+    async def import_current(rt=Depends(authorize)):
+        rt.pole.require_live()
+        if rt.pole.capture_lock.locked():
+            raise HTTPException(409, "Wait for the current capture and PLY generation to finish")
+        async with rt.pole.output_lock:
+            try:
+                return await asyncio.to_thread(archive_clouds, archive_root(rt.store),
+                                               [POINTDIT_OUTPUT / cloud_name(slot) for slot in SLOTS])
+            except FileNotFoundError as error:
+                raise HTTPException(404, "The PointDiT output folder needs all four PLY files") from error
+            except (OSError, RuntimeError) as error:
+                raise HTTPException(503, f"Could not save the current PointDiT output: {error}") from error
 
     def save_capture(rt, order, frames):
         if not frames:
@@ -277,7 +372,8 @@ def routes(authorize):
             log_path = rt.store.path.parent / "pointdit" / (ident + ".log")
             try:
                 files = generate_pointdit(log_path)
-                info["pointdit"] = dict(status="succeeded", files=files, log=str(log_path))
+                version = archive_clouds(archive_root(rt.store), files, capture=ident, captured_at=info["created"])
+                info["pointdit"] = dict(status="succeeded", files=files, model_id=version["id"], log=str(log_path))
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                 info["pointdit"] = dict(status="failed", error=str(error), log=str(log_path))
                 with rt.store.tx(True) as db:

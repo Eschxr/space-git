@@ -32,7 +32,7 @@ export function ObservationImage({observation, label}: {observation: Observation
       <option value="image">Source image</option><option value="crop">Object crop</option><option value="overlay">Run overlay</option>
     </select>
     {observation.mask?.url && <a className="ih-mask-download" href={observation.mask.url} download>Download mask RLE JSON</a>}
-    <div className="ih-image">{asset ? <AssetImage key={asset.url} asset={asset} alt={label + ' ' + observation.label}/> : <div className="ih-unavailable">This layer is unavailable.</div>}
+    <div className="ih-image" style={{aspectRatio: `${observation.width} / ${observation.height}`}}>{asset ? <AssetImage key={asset.url} asset={asset} alt={label + ' ' + observation.label}/> : <div className="ih-unavailable">This layer is unavailable.</div>}
       {mode === 'image' && <svg viewBox={`0 0 ${observation.width} ${observation.height}`} aria-hidden="true"><rect x={observation.box_xyxy[0]} y={observation.box_xyxy[1]} width={observation.box_xyxy[2] - observation.box_xyxy[0]} height={observation.box_xyxy[3] - observation.box_xyxy[1]} fill="none" stroke="#f3cc62" strokeWidth={Math.max(observation.width / 220, 2)}/></svg>}
     </div>
     <figcaption>Source capture {short(observation.capture_id)} · run {short(observation.run_id)}</figcaption>

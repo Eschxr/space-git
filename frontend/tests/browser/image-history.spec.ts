@@ -22,6 +22,8 @@ test('upload, human review, selected commit and approved evidence stay in image 
     const json = (value: unknown) => route.fulfill({json: value, headers});
     const pageOf = (items: unknown[]) => json({items, limit: 50, offset: 0});
     if (request.method() === 'OPTIONS') return route.fulfill({status: 204, headers});
+    if (path === '/vision/status') return json({provider:'fake',detector:'Synthetic fixture detector',embedder:'Synthetic appearance features',device:'cpu',assets_verified:false,reason:null});
+    if (path === '/processing-runs/run-one/detections') return pageOf([]);
     if (path === '/environments') return pageOf([{id: 'space-one', name: 'Lab', prompts: null, created_at: stamp}]);
     if (path === '/environments/space-one/captures' && request.method() === 'POST') {
       expect(request.postDataBuffer()?.toString()).toContain('filename="cam_04.png"'); uploaded = true; return json(capture);
@@ -75,7 +77,7 @@ test('upload, human review, selected commit and approved evidence stay in image 
 test('an unavailable API stays an explicit error with no simulation fallback', async ({page}) => {
   await page.route(api + '/**', route => route.abort());
   await page.goto('/image-history');
-  await expect(page.locator('p[role=alert]')).toContainText('Scene Tracker is unreachable');
+  await expect(page.locator('p[role=alert]').first()).toContainText('Scene Tracker is unreachable');
   await expect(page.getByRole('button', {name: 'Refresh spaces', exact: true})).toBeVisible();
   await expect(page.getByText('No approved revisions yet.')).toHaveCount(0);
 });
@@ -119,6 +121,7 @@ test('complete saved rig sessions keep slot identity, original bytes and frame t
     const headers = cors(), json = (value: unknown) => route.fulfill({json: value, headers});
     const pageOf = (items: unknown[]) => json({items, limit: 50, offset: 0});
     if (request.method() === 'OPTIONS') return route.fulfill({status: 204, headers});
+    if (path.endsWith('/vision/status')) return json({provider:'fake',detector:'Synthetic fixture detector',embedder:'Synthetic appearance features',device:'cpu',assets_verified:false,reason:null});
     if (path.endsWith('/environments')) return pageOf([{id: 'rig-space', name: 'Rig lab', created_at: stamp}]);
     if (path.endsWith('/captures') && request.method() === 'POST') {body = request.postDataBuffer()!.toString(); uploaded = true; return json(capture);}
     if (path.endsWith('/captures')) return pageOf(uploaded ? [capture] : []);

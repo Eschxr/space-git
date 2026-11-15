@@ -32,7 +32,9 @@ from .geometry import CHECK, FIT, corners, mapped, solve, solve_projector, solve
 from .markerless import ObjectTracker
 from .models import Branch, CalibrationInput, CalibrationSettings, CameraInput, Deploy, Diff, Id, JobInput, Merge, ObservationCommit, Pair, ProjectionInput, ProjectionSettings, Save, Scene, Strict, TrackInput, VisualTransform, WorkspaceInput
 from .navigation import Plan
+from .projector_chat import GenerateObject, ObjectPosition, ProjectorChat, generate as generate_projector_object, reply as projector_reply
 from .rig import PoleRig, routes as rig_routes
+from .surfaces import SurfaceJobs, routes as surface_routes
 from .quality import Timing, board_view, estimate_intrinsics, fingerprint, geometry_reason, physical_point, residuals, topology_id, view_signature
 from .store import ROOT, Store, compact, issues, new_id
 
@@ -325,6 +327,7 @@ class Runtime:
 
 
 def make_app(path=None, mode=None, token=None):
+    surface_jobs = SurfaceJobs()
     root=Path(os.getenv("SPACEGIT_DATA",ROOT/"data")).resolve()
     mode=mode or os.getenv("SPACEGIT_MODE","live")
     if mode not in ("demo","live"):
@@ -397,6 +400,7 @@ def make_app(path=None, mode=None, token=None):
                 await task
             await asyncio.to_thread(app.state.runtime.pole.stop)
             await asyncio.to_thread(app.state.runtime.camera.stop)
+            await asyncio.to_thread(surface_jobs.shutdown)
 
     app=FastAPI(title="SpaceGit Edge",version="1.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=["localhost","127.0.0.1","[::1]","testserver"])
@@ -1090,6 +1094,71 @@ def make_app(path=None, mode=None, token=None):
         return FileResponse(result,media_type=ARTIFACTS[name],filename=f"{asset[:8]}-{name}")
 
     app.include_router(rig_routes(authorize))
+    app.include_router(surface_routes(authorize, surface_jobs))
+
+    @app.post('/api/v1/projector/chat')
+    def projector_chat(request: ProjectorChat, _=Depends(authorize)):
+        return {"reply": projector_reply(request)}
+
+    @app.get('/api/v1/projector/scenes/{scene_id}/objects')
+    def projector_objects(scene_id: Id, rt=Depends(authorize)):
+        with rt.store.tx() as db:
+            return [json.loads(row[0]) for row in db.execute(
+                "SELECT body FROM projector_objects WHERE scene=? ORDER BY rowid", (scene_id,))]
+
+    @app.post('/api/v1/projector/scenes/{scene_id}/objects', status_code=201)
+    def add_projector_object(scene_id: Id, request: GenerateObject, rt=Depends(authorize)):
+        def existing(db):
+            row = db.execute("SELECT body FROM projector_objects WHERE scene=? AND id=?",
+                             (scene_id, request.request_id)).fetchone()
+            if row:
+                item = json.loads(row[0])
+                if item["prompt"] != request.prompt:
+                    raise HTTPException(409, "This request ID was used for a different description")
+                return item
+            count = db.execute("SELECT count(*) FROM projector_objects WHERE scene=?", (scene_id,)).fetchone()[0]
+            if count >= 24:
+                raise HTTPException(409, "This scene already has 24 generated objects")
+            return None
+
+        with rt.store.tx() as db:
+            if item := existing(db):
+                return item
+        design = generate_projector_object(request.prompt)
+        item = {**design.model_dump(mode="json"), "id": request.request_id, "prompt": request.prompt}
+        with rt.store.tx(True) as db:
+            if prior := existing(db):
+                return prior
+            db.execute("INSERT INTO projector_objects VALUES(?,?,?)", (scene_id, request.request_id, json.dumps(item)))
+        return item
+
+    @app.post('/api/v1/projector/scenes/{scene_id}/objects/{object_id}/regenerate')
+    def regenerate_projector_object(scene_id: Id, object_id: Id, rt=Depends(authorize)):
+        with rt.store.tx() as db:
+            row = db.execute("SELECT body FROM projector_objects WHERE scene=? AND id=?", (scene_id, object_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "This generated object was not found in the current scene")
+        prior = json.loads(row[0])
+        design = generate_projector_object(prior["prompt"])
+        item = {**design.model_dump(mode="json"), "id": object_id, "prompt": prior["prompt"],
+                "placement": prior["placement"], "offset": prior.get("offset", [0, 0, 0])}
+        with rt.store.tx(True) as db:
+            changed = db.execute("UPDATE projector_objects SET body=? WHERE scene=? AND id=? AND body=?",
+                                 (json.dumps(item), scene_id, object_id, row[0])).rowcount
+            if not changed:
+                raise HTTPException(409, "This object changed during generation. Refresh it and try again.")
+        return item
+
+    @app.post('/api/v1/projector/scenes/{scene_id}/objects/{object_id}/position')
+    def position_projector_object(scene_id: Id, object_id: Id, position: ObjectPosition, rt=Depends(authorize)):
+        with rt.store.tx(True) as db:
+            row = db.execute("SELECT body FROM projector_objects WHERE scene=? AND id=?", (scene_id, object_id)).fetchone()
+            if not row:
+                raise HTTPException(404, "This generated object was not found in the current scene")
+            item = json.loads(row[0])
+            item["offset"] = list(position.offset)
+            db.execute("UPDATE projector_objects SET body=? WHERE scene=? AND id=?", (json.dumps(item), scene_id, object_id))
+        return item
     return app
 
 

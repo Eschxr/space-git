@@ -1,13 +1,14 @@
 'use client';
 import {Canvas, useFrame, useThree} from '@react-three/fiber';
-import {Component, useEffect, useRef, type ReactNode, type RefObject} from 'react';
+import {Component, useEffect, useMemo, useRef, type ReactNode, type RefObject} from 'react';
 import {Box3, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, PointLight, Texture, Vector3, type Camera, type BufferGeometry, type Object3D} from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {PLYLoader} from 'three/addons/loaders/PLYLoader.js';
 import type {Card, Scene} from '../../../../packages/protocol/types';
 import {parseModel} from '../components/io';
-import {isNormalized, type Delta, type Projection} from './domain';
+import {isNormalized, type Delta, type ProjectedObject, type Projection} from './domain';
+import {bindProjectedObjectDrag,clearProjectedObjects,drawProjectedObjects} from '../../public/camera-rig/projector-objects.js';
 import {Engine, type Agent} from './engine';
 
 type XYZ = [number,number,number];
@@ -24,12 +25,14 @@ const fade = (time:number, start:number, end:number) => {
 };
 type RevealClock = RefObject<number>;
 
-export default function Viewport({office=false, scene, simulated=false, lowPower=false, angle='Portal', engine, agents=[], selected, select, diff=[], cloud=false, reset=0, asset, visible=true, reveal=0, reducedMotion=false, onReveal}:{
+export default function Viewport({office=false, scene, simulated=false, lowPower=false, angle='Portal', engine, agents=[], selected, select, diff=[], cloud=false, reset=0, asset, visible=true, reveal=0, reducedMotion=false, onReveal, projectedObjects,editId,onMove}:{
   office?:boolean; scene?:Scene; simulated?:boolean; lowPower?:boolean; angle?:Projection['angle'];
   engine?:RefObject<Engine|null>; agents?:Agent[]; selected?:string; select?:(id:string)=>void; diff?:Delta[];
   cloud?:boolean; reset?:number; asset?:Loaded|null; visible?:boolean;
   reveal?:number; reducedMotion?:boolean; onReveal?:(reveal:number)=>void;
+  projectedObjects?:ProjectedObject[]; editId?:string; onMove?:(id:string,offset:XYZ)=>void;
 }) {
+  const orbit=useRef<OrbitControls|null>(null);
   const current = asset && 'scene' in asset ? asset.scene : scene;
   const fallback=<Fallback reveal={reveal} onReveal={onReveal}/>;
   return <RenderBoundary fallback={fallback}>
@@ -42,7 +45,7 @@ export default function Viewport({office=false, scene, simulated=false, lowPower
       <ambientLight intensity={office?.42:.88}/><hemisphereLight args={['#ececec','#515151',office?.52:1]}/>
       {office && engine ?
         <OfficeScene {...{angle, lowPower, engine, agents, reveal, reducedMotion, onReveal}}/> : <>
-        <InspectionCamera reset={reset} view={current?.id} asset={asset}/>
+        <InspectionCamera reset={reset} view={current?.id} asset={asset} controlsRef={orbit}/>
         <directionalLight position={[1,7,5]} intensity={2}/>
         {(!asset || 'scene' in asset || 'geometry' in asset && !cloud) && current &&
           <Study scene={current} simulated={simulated && !(asset && 'scene' in asset)} {...{selected,select,diff,cloud:cloud&&!asset}}/>}
@@ -50,14 +53,40 @@ export default function Viewport({office=false, scene, simulated=false, lowPower
         {asset && 'geometry' in asset && cloud && <points geometry={asset.geometry}>
           <pointsMaterial size={.024} sizeAttenuation color={asset.geometry.hasAttribute('color')?'white':'#d6d6d6'} vertexColors={asset.geometry.hasAttribute('color')}/>
         </points>}
+        {projectedObjects?.length ? <ObjectLayer objects={projectedObjects} asset={asset} orbit={orbit} editId={editId} onMove={onMove}/> : null}
       </>}
     </Canvas>
   </RenderBoundary>;
 }
 
+function ObjectLayer({objects,asset,orbit,editId,onMove}:{objects:ProjectedObject[];asset?:Loaded|null;orbit:RefObject<OrbitControls|null>;editId?:string;onMove?:(id:string,offset:XYZ)=>void}) {
+  const layer=useRef<Group>(null);
+  const {camera,gl}=useThree();
+  const anchor=useMemo(()=>{
+    const bounds=asset&&'model' in asset?new Box3().setFromObject(asset.model):asset&&'geometry' in asset?asset.geometry.boundingBox:null;
+    const center=bounds?.getCenter(new Vector3());
+    const scale=bounds?Math.max(.01,bounds.getSize(new Vector3()).length()/5):1;
+    return {x:center?.x??0,y:bounds?.min.y??0,z:center?center.z+scale*.5:.9,scale};
+  },[asset]);
+  useEffect(()=>{
+    if(layer.current)drawProjectedObjects(layer.current,objects,anchor);
+  },[objects,anchor]);
+  useEffect(()=>{
+    const group=layer.current;
+    return ()=>{if(group)clearProjectedObjects(group);};
+  },[]);
+  useEffect(()=>{
+    const group=layer.current;
+    if(!group||!editId||!onMove)return;
+    return bindProjectedObjectDrag({canvas:gl.domElement,camera,layer:group,editable:()=>editId,
+      pauseOrbit:paused=>{if(orbit.current)orbit.current.enabled=!paused;},moved:onMove});
+  },[camera,gl,orbit,editId,onMove]);
+  return <group ref={layer}/>;
+}
+
 function Fallback({reveal,onReveal}:{reveal:number;onReveal?:(reveal:number)=>void}) {
   useEffect(()=>{onReveal?.(reveal);},[onReveal,reveal]);
-  return <div className="nw-render-note" role="status">3D rendering needs WebGL. Scene details and the projection test pattern are still available.</div>;
+  return <div className="nw-render-note" role="status">3D rendering needs WebGL. Open SpaceGit in a browser with hardware acceleration.</div>;
 }
 class RenderBoundary extends Component<{children:ReactNode;fallback:ReactNode},{failed:boolean}> {
   state={failed:false};
@@ -107,17 +136,16 @@ function moveCamera(camera:Camera, point:Vector3, angle:Projection['angle'], dt:
     }
 }
 
-function InspectionCamera({reset,view,asset}:{reset:number;view?:string;asset?:Loaded|null}) {
+function InspectionCamera({reset,view,asset,controlsRef}:{reset:number;view?:string;asset?:Loaded|null;controlsRef:RefObject<OrbitControls|null>}) {
   const {camera,gl}=useThree();
-  const control=useRef<OrbitControls|null>(null);
   useEffect(()=>{
     const controls=new OrbitControls(camera,gl.domElement);
     controls.enableDamping=true;controls.minDistance=.12;controls.maxDistance=100;controls.maxPolarAngle=Math.PI*.89;
-    control.current=controls;
-    return ()=>{control.current=null;controls.dispose();};
-  },[camera,gl]);
-  useEffect(()=>{if (control.current) frameScene(camera,control.current,asset);},[camera,reset,view,asset]);
-  useFrame(()=>control.current?.update());
+    controlsRef.current=controls;
+    return ()=>{controlsRef.current=null;controls.dispose();};
+  },[camera,gl,controlsRef]);
+  useEffect(()=>{if (controlsRef.current) frameScene(camera,controlsRef.current,asset);},[camera,reset,view,asset,controlsRef]);
+  useFrame(()=>controlsRef.current?.update());
   return null;
 }
 function frameScene(camera:Camera,controls:OrbitControls,asset?:Loaded|null){

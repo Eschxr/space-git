@@ -53,15 +53,12 @@ reads the fixed `/home/wilson/test_images` path, so this workflow uses the defau
 capture directory. Direct edge launches without `SPACEGIT_POINTDIT_WSL=1` export
 the available views without invoking PointDiT.
 
-After successful PointDiT generation, **Reconstruct → Camera rig** displays the
-supplied multi-camera HTML viewer inside SpaceGit. It loads `camera_poses NEWEST.json`
-from the bundled `public/camera-rig/camera-poses.json` and the four latest generated
-PLYs through authenticated edge requests. Viewer camera 1 is Floor, camera 2 is
-Radial A, camera 3 is Radial B, and camera 4 is Radial C. **Reload PLY files** loads
-the latest output again. The original viewer's orbit, camera view, transform gizmo,
-denoise, config import/export, and PLY controls are available. **Scene revision**
-opens the existing revision viewer. The embedded viewer bundles its original
-Three.js 0.170.0 modules and license in `public/camera-rig/vendor`.
+After successful PointDiT generation, **Reconstruct** loads the four archived
+PLYs through authenticated edge requests. The rig loads its camera poses from
+`apps/web/public/camera-rig/camera-poses.json`. Viewer camera 1 is Floor and
+cameras 2–4 are Radial A, Radial B, and Radial C. The original viewer tools and
+vendored Three.js modules are available. **Surface reconstruction** can also load
+a local PLY and build a smooth mesh. [Surface reconstruction setup and workflow](docs/surface-reconstruction.md).
 
 ## Start on Linux
 

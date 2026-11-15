@@ -1,3 +1,4 @@
+import hashlib
 import time
 
 from fastapi.testclient import TestClient
@@ -47,8 +48,10 @@ def test_four_camera_capture_exports_before_generating_ply(tmp_path, monkeypatch
         calls.append("generate")
         if fails:
             raise RuntimeError("model failed")
-        return ["01_radial_a_pointcloud.ply", "02_radial_b_pointcloud.ply",
-                "03_radial_c_pointcloud.ply", "04_floor_pointcloud.ply"]
+        paths = [tmp_path / rig_module.cloud_name(slot) for slot in (1, 2, 3, 4)]
+        for slot, path in enumerate(paths, 1):
+            path.write_bytes(b"ply\n" + bytes([slot]))
+        return [str(path) for path in paths]
 
     monkeypatch.setattr(rig_module, "export_frames", export)
     monkeypatch.setattr(rig_module, "generate_pointdit", generate)
@@ -68,6 +71,43 @@ def test_four_camera_capture_exports_before_generating_ply(tmp_path, monkeypatch
         assert saved["pointdit"]["status"] == ("failed" if fails else "succeeded")
         if not fails:
             assert len(saved["pointdit"]["files"]) == 4
+            assert saved["pointdit"]["model_id"] == saved["id"]
+            versions = client.get("/api/v1/rig/models", headers=AUTH).json()
+            assert [item["capture_id"] for item in versions] == [saved["id"]]
+            (tmp_path / rig_module.cloud_name(4)).write_bytes(b"ply\nnew floor")
+            archived = client.get(f"/api/v1/rig/models/{saved['id']}/pointclouds/4", headers=AUTH)
+            assert archived.content == b"ply\n\x04"
+        else:
+            assert client.get("/api/v1/rig/models", headers=AUTH).json() == []
+
+
+def test_archive_current_keeps_independent_versions_and_rejects_partial_sets(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.setattr(rig_module, "POINTDIT_OUTPUT", output)
+    floors = [b"ply\nfirst floor", b"ply\nsecond floor"]
+    with TestClient(make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)) as client:
+        assert client.post("/api/v1/rig/models/import-current", headers=AUTH).status_code == 404
+        assert client.get("/api/v1/rig/models").status_code == 401
+        for slot in (1, 2, 3):
+            (output / rig_module.cloud_name(slot)).write_bytes(b"ply\n" + bytes([slot]))
+        ids = []
+        for floor in floors:
+            (output / rig_module.cloud_name(4)).write_bytes(floor)
+            response = client.post("/api/v1/rig/models/import-current", headers=AUTH)
+            assert response.status_code == 201
+            model = response.json()
+            assert model["capture_id"] is None
+            assert model["files"][3]["sha256"] == hashlib.sha256(floor).hexdigest()
+            ids.append(model["id"])
+        assert ids[0] != ids[1]
+        assert client.post("/api/v1/rig/models/import-current", headers=AUTH).json()["id"] == ids[1]
+        (output / rig_module.cloud_name(1)).unlink()
+        assert client.post("/api/v1/rig/models/import-current", headers=AUTH).status_code == 404
+        assert {model["id"] for model in client.get("/api/v1/rig/models", headers=AUTH).json()} == set(ids)
+    with TestClient(make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)) as client:
+        for ident, floor in zip(ids, floors):
+            assert client.get(f"/api/v1/rig/models/{ident}/pointclouds/4", headers=AUTH).content == floor
 
 
 def test_pointdit_checks_fresh_output_and_activates_wsl_environment(tmp_path, monkeypatch):

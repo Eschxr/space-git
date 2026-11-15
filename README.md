@@ -58,7 +58,7 @@ needs a separate Python 3.12 environment. The Docker API/vision worker use Pytho
 
 | Component | Local address |
 | --- | --- |
-| Frontend | http://127.0.0.1:3101 |
+| New Worlds home | http://127.0.0.1:3101 |
 | Image history | http://127.0.0.1:3101/image-history |
 | Capture / 3D / Project | http://127.0.0.1:3101/world |
 | Scene Tracker backend API | http://127.0.0.1:8001 |

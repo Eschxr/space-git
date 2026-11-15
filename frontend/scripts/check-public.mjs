@@ -14,7 +14,7 @@ try{
  for(const route of ['/','/studio','/studio/live','/studio/3d','/studio/history','/studio/merge','/setup','/studio/capture','/projector']){
   const response=await page.goto(new URL(route,url).href,{waitUntil:'networkidle'});
   if(response?.status()!==200)throw Error(route+' returned '+response?.status());
-  if(route==='/')await page.getByRole('heading',{name:'Version control for physical space.'}).waitFor();
+  if(route==='/')await page.getByRole('button',{name:/^Start Demo/}).waitFor();
   if(route==='/studio'){
     await page.getByText('DEMO / READ ONLY').waitFor();
     await page.locator('canvas').waitFor();

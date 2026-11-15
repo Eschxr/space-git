@@ -103,6 +103,6 @@ export default function ImageHistory() {
         {error && <p className="nw-notice" role="alert">{error}</p>}{busy && <p className="nw-notice" role="status">{busy}…</p>}
         {space ? <SpaceWorkspace key={space.id} api={api} space={space} busy={!!busy} run={run}/> : connected && <section className="nw-panel ih-empty"><h2>Choose or create a saved space</h2><p>Each physical room has its own captures and approved revisions. Use consistent fixed camera roles within a space.</p></section>}
       </>}
-    </main><footer className="nw-shell nw-footer"><span>SPACEGIT / IMAGE HISTORY</span><Link href="/world">Capture · 3D · Project</Link><Link href="/studio">Hardware studio</Link></footer>
+    </main><footer className="nw-shell nw-footer"><span>SPACEGIT / IMAGE HISTORY</span><Link href="/world">Capture · 3D · Project</Link></footer>
   </div>;
 }

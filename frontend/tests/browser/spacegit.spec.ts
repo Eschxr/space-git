@@ -2,14 +2,9 @@ import {expect,test} from '@playwright/test';
 import {testToken} from '../../playwright.config';
 import {readFile} from 'node:fs/promises';
 
-test('landing preview and interactive studio render with honest provenance',async({page},info)=>{
+test('direct Studio route renders with simulation provenance',async({page},info)=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto('/');
- await expect(page.getByRole('heading',{name:'Version control for physical space.'})).toBeVisible();
- await page.getByRole('button',{name:'Preview next object'}).click();
- await expect(page.getByText('Exhibit B',{exact:false})).toBeVisible();
- await page.screenshot({path:info.outputPath('landing.png'),fullPage:true,animations:'disabled'});
- await page.getByRole('link',{name:'Launch Studio'}).last().click();
+ await page.goto('/studio');
  await expect(page.getByRole('heading',{name:'Scene overview'})).toBeVisible();
  await expect(page.getByText('DEMO / READ ONLY')).toBeVisible();
  await expect(page.locator('canvas')).toBeVisible();

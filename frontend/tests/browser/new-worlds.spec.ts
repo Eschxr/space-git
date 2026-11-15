@@ -55,7 +55,8 @@ test('one-click demo records, versions, reconstructs and projects without the ed
  page.on('pageerror',e=>errors.push(e.message));
  await page.route(edgeURL+'/**',route=>route.abort());
  await page.goto('/');
- await page.getByRole('link',{name:'Start Demo',exact:true}).click();
+ await expect(page.getByRole('link',{name:'Hardware studio'})).toHaveCount(0);
+ await page.getByRole('button',{name:/^Start Demo/}).click();
  const guide=page.getByRole('region',{name:'Guided demo'});
  await expect(guide.getByText('Inspect the four feeds')).toBeVisible();
  await guide.getByRole('button',{name:'Pause demo'}).click();

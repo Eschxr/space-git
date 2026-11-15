@@ -238,7 +238,6 @@ export default function World({projector=false}:{projector?:boolean}) {
         </Link>
         <div className="nw-top-actions">
           <span className="nw-chip nw-mode"><i/>{live&&!edgeDown?'LOCAL EDGE':live?'EDGE UNAVAILABLE':'SIMULATION MODE'}</span>
-          <Link href="/studio" className="nw-legacy">Hardware studio <Icon name="external" size={13}/></Link>
           <button className="nw-btn nw-primary nw-demo-start" onClick={startDemo}><span aria-hidden="true">▶</span> Start Demo <kbd>D</kbd></button>
         </div>
       </div>

@@ -4,6 +4,15 @@ Version control for physical spaces. Save a measured wall layout, compare it wit
 
 [Open the public read-only demo](https://spacegit-3d.vercel.app).
 
+The local **Image history** workspace connects Scene Tracker to saved spaces,
+immutable four-camera captures, YOLOE/DINOv2 processing, human review and approved
+revisions. See the [integration guide](../docs/frontend-integration.md) for the
+Docker API/worker and this system's ports: web **3101**, API **8001**, edge **8002**.
+Copy `apps/web/.env.local.example` before building the integrated frontend.
+After installing the Python edge dependencies, use
+`scripts/start.ps1 -Mode live -Port 3101 -EdgePort 8002` to start its web and camera services.
+Metric layouts, 3D viewers and projector tools remain available alongside image history.
+
 ## New Worlds demo
 
 Run `pnpm install --frozen-lockfile` and `pnpm dev`, then open [SpaceGit](http://127.0.0.1:3000) and click **Start Demo**. The guided flow captures a simulated room, compares two commits, opens the scene in 3D, and projects an animated virtual office. Open [Project](http://127.0.0.1:3000/project) on your second monitor for fullscreen output and an alignment pattern.

@@ -332,7 +332,12 @@ def make_app(path=None, mode=None, token=None):
     path=Path(path or root/f"{mode}.sqlite3")
     files=path.parent/f"{path.stem}-files"
     token=token or os.getenv("SPACEGIT_TOKEN")
-    origins=["http://localhost:3000","http://127.0.0.1:3000"]
+    local_origins=["http://localhost:3000","http://127.0.0.1:3000",
+                   "http://localhost:3101","http://127.0.0.1:3101"]
+    origins=list(local_origins)
+    edge_port=int(os.getenv("SPACEGIT_EDGE_PORT", "8000"))
+    if not 1024 <= edge_port <= 65535:
+        raise RuntimeError("SPACEGIT_EDGE_PORT must be between 1024 and 65535")
     local_session_secret = secrets.token_bytes(32) if os.getenv("SPACEGIT_LOCAL_SESSION") == "1" else None
     mobile=os.getenv("SPACEGIT_MOBILE_ORIGIN","").rstrip("/")
     if mobile and not mobile.startswith("https://"):
@@ -416,7 +421,7 @@ def make_app(path=None, mode=None, token=None):
         return hmac.digest(local_session_secret, f"{origin}:{payload}".encode(), "sha256").hex()
 
     def session_valid(supplied, origin):
-        if local_session_secret is None or origin not in origins[:2] or len(supplied) > 128:
+        if local_session_secret is None or origin not in local_origins or len(supplied) > 128:
             return False
         match = re.fullmatch(r"(local\.([0-9]{1,12})\.[a-zA-Z0-9_-]{22})\.([0-9a-f]{64})", supplied)
         if not match:
@@ -431,8 +436,8 @@ def make_app(path=None, mode=None, token=None):
     def local_session(request: Request, origin: str = Header(default=""), authorization: str = Header(default="")):
         if local_session_secret is None:
             raise HTTPException(404, "Automatic local connection is unavailable")
-        if (origin not in origins[:2] or not request.client or request.client.host not in ("127.0.0.1", "::1")
-                or request.headers.get("host") not in ("127.0.0.1:8000", "localhost:8000")
+        if (origin not in local_origins or not request.client or request.client.host not in ("127.0.0.1", "::1")
+                or request.headers.get("host") not in (f"127.0.0.1:{edge_port}", f"localhost:{edge_port}")
                 or request.headers.get("x-spacegit-local") != "1"
                 or any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers)):
             raise HTTPException(403, "Automatic connection requires the local Studio")
@@ -443,7 +448,7 @@ def make_app(path=None, mode=None, token=None):
         return {"token": f"{payload}.{sign_session(origin, payload)}"}
 
     def authorize(authorization: str=Header(default=""), origin: str=Header(default="")):
-        if origin and origin not in origins[:2]:
+        if origin and origin not in local_origins:
             raise HTTPException(403,"Hardware control is local only")
         if not authorization.startswith("Bearer ") or not operator(authorization[7:], origin):
             raise HTTPException(401,"Enter the local operator key")
@@ -872,7 +877,7 @@ def make_app(path=None, mode=None, token=None):
 
     @app.websocket("/ws/live")
     async def live(ws:WebSocket):
-        if ws.headers.get("origin") not in origins[:2] or "spacegit.v1" not in ws.scope.get("subprotocols",[]):
+        if ws.headers.get("origin") not in local_origins or "spacegit.v1" not in ws.scope.get("subprotocols",[]):
             await ws.close(code=1008)
             return
         await ws.accept(subprotocol="spacegit.v1")
@@ -933,7 +938,7 @@ def make_app(path=None, mode=None, token=None):
         rt=runtime()
         origin=request.headers.get("origin","")
         commit=session=None
-        if secrets.compare_digest(authorization.encode(),f"Bearer {token}".encode()) and origin in ["",*origins[:2]]:
+        if secrets.compare_digest(authorization.encode(),f"Bearer {token}".encode()) and origin in ["",*local_origins]:
             pass
         else:
             commit,_,session=mobile_lease(rt,authorization,origin)

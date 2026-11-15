@@ -193,16 +193,19 @@ def test_sequence_changes_keep_active_devices_and_old_captures(tmp_path, monkeyp
         assert client.get(path, headers=AUTH).json()["settings"] == settings
 
 
-def test_capture_can_connect_via_a_loopback_session(tmp_path, monkeypatch):
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:3000", "http://127.0.0.1:3101"])
+@pytest.mark.parametrize("port", [8000, 8002])
+def test_capture_can_connect_via_a_loopback_session(tmp_path, monkeypatch, origin, port):
     monkeypatch.setenv("SPACEGIT_LOCAL_SESSION", "1")
+    monkeypatch.setenv("SPACEGIT_EDGE_PORT", str(port))
     app = make_app(path=tmp_path / "db.sqlite", mode="demo", token=TOKEN)
-    with TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 15000)) as client:
+    with TestClient(app, base_url=f"http://127.0.0.1:{port}", client=("127.0.0.1", 15000)) as client:
         path = "/api/v1/local-session"
-        origin = "http://127.0.0.1:3000"
         headers = {"Origin": origin, "X-SpaceGit-Local": "1"}
         assert client.post(path, headers={"Origin": origin}).status_code == 403
         assert client.post(path, headers={**headers, "X-Forwarded-For": "127.0.0.1"}).status_code == 403
         assert client.post(path, headers={**headers, "Origin": "https://example.org"}).status_code == 403
+        assert client.post(path, headers={**headers, "Host": "127.0.0.1:9002"}).status_code == 403
         session = client.post(path, headers=headers).json()["token"]
         auth = {"Authorization": f"Bearer {session}"}
         assert client.get("/api/v1/rig", headers={**auth, "Origin": origin}).status_code == 200

@@ -1,4 +1,6 @@
 from datetime import timedelta
+from pathlib import PurePosixPath
+from urllib.parse import quote
 from uuid import UUID
 
 from minio import Minio
@@ -80,4 +82,10 @@ class S3Store:
             self.bucket,
             scoped_key(self.environment_id, blob.key),
             expires=timedelta(seconds=expires_seconds),
+            response_headers={
+                "response-content-disposition": "attachment; filename*=UTF-8''"
+                + quote(PurePosixPath(blob.key).name, safe="")
+            }
+            if blob.content_type == "application/json"
+            else None,
         )

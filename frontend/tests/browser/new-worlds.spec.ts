@@ -1,4 +1,5 @@
 import {expect,test} from '@playwright/test';
+const edgeURL=process.env.SPACEGIT_TEST_EDGE_URL ?? 'http://127.0.0.1:8000';
 
 test('Capture connects, saves the camera sequence and refreshes the floor preview',async({page,baseURL})=>{
  const origin=new URL(baseURL!).origin;
@@ -7,7 +8,7 @@ test('Capture connects, saves the camera sequence and refreshes the floor previe
  let enabled=false, frames=0, connected=false;
  const cors={'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Headers':'authorization,content-type,x-spacegit-local','Access-Control-Allow-Methods':'GET,POST,OPTIONS'};
  const frame=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+WZkAAAAASUVORK5CYII=','base64');
- await page.route('http://127.0.0.1:8000/api/v1/**',async route=>{
+ await page.route(edgeURL+'/api/v1/**',async route=>{
   const request=route.request(), path=new URL(request.url()).pathname.slice('/api/v1'.length);
   if(request.method()==='OPTIONS')return route.fulfill({status:204,headers:cors});
   const json=(value:unknown)=>route.fulfill({json:value,headers:cors});
@@ -52,7 +53,7 @@ test('Capture connects, saves the camera sequence and refreshes the floor previe
 test('one-click demo records, versions, reconstructs and projects without the edge',async({page},info)=>{
  const errors:string[]=[];
  page.on('pageerror',e=>errors.push(e.message));
- await page.route('http://127.0.0.1:8000/**',route=>route.abort());
+ await page.route(edgeURL+'/**',route=>route.abort());
  await page.goto('/');
  await page.getByRole('link',{name:'Start Demo',exact:true}).click();
  const guide=page.getByRole('region',{name:'Guided demo'});
@@ -142,7 +143,7 @@ test('the selected projector receives a separate fullscreen window controlled by
  await expect.poll(()=>output.evaluate(()=>document.fullscreenElement?.getAttribute('aria-label'))).toBe('Projector output');
  await expect.poll(()=>firstWall!.evaluate(element=>element.isConnected)).toBe(false);
  await expect(closedWall).toHaveAttribute('data-open','true');
- await expect(closedWall.locator('.nw-portal-leaf-left')).toHaveCSS('opacity','0');
+ await expect.poll(async()=>Number(await closedWall.locator('.nw-portal-leaf-left').evaluate(element=>getComputedStyle(element).opacity))).toBeLessThan(.001);
  await expect(page.getByRole('heading',{name:'Project',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Test pattern'}).click();
  await expect(surface.getByRole('img',{name:/Projection alignment grid/})).toBeVisible();

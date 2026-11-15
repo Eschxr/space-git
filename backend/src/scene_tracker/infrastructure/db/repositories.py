@@ -48,6 +48,18 @@ class Repository:
                 .one()
             )
 
+    def list_environments(self, limit, offset):
+        with self.engine.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    select(environments)
+                    .order_by(environments.c.created_at.desc(), environments.c.id)
+                    .limit(limit)
+                    .offset(offset)
+                ).mappings()
+            ]
+
     def begin_capture(self, environment_id, captured_at):
         self.environment(environment_id)
         capture_id = uuid4()

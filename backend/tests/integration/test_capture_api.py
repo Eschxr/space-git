@@ -67,6 +67,20 @@ def capture(api):
     return response.json()
 
 
+def test_saved_space_picker_reads_persisted_environments_in_pages(api):
+    ids = [
+        api.client.post("/api/v1/environments", json={"name": name}).json()["id"]
+        for name in ["Lab", "Bedroom", "Office"]
+    ]
+    found = []
+    for offset in range(3):
+        page = api.client.get(f"/api/v1/environments?limit=1&offset={offset}")
+        assert page.status_code == 200
+        found.extend(item["id"] for item in page.json()["items"])
+    assert found == list(reversed(ids))
+    assert api.client.get("/api/v1/environments?offset=3").json()["items"] == []
+
+
 def test_four_frame_ingestion_retrieval_and_failed_state(api):
     result = capture(api)
     assert result["status"] == "ready"

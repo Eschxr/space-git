@@ -7,14 +7,17 @@ Original images and accepted history stay immutable. Ambiguous matches remain vi
 for review; physical identity is never merged automatically across cameras.
 
 Refactor R0–R6 replaces the old prompted pipeline. Fake/stub and real-service tests
-validate the workflow; real pretrained inference remains unvalidated on this host
-without operator assets/runtime. [Status](docs/refactor-status.md),
+validate the workflow. Local pretrained execution and the integrated browser smoke
+are recorded in [implementation status](docs/implementation-status.md). [Refactor status](docs/refactor-status.md),
 [historical implementation record](docs/implementation-status.md),
 [controlling refactor plan](CODEX_YOLOE_REFACTOR_PLAN.md). Phase 5 camera-local
 tracking is complete; [assessment and gate](docs/phase5-assessment.md). The
 [active implementation plan](CODEX_IMPLEMENTATION_PLAN.md) now follows YOLOE + DINOv2.
-The full image-history workflow still has [Phase 6–8 completion work](docs/phase8-gap-assessment.md);
-the refactor's commit/diff gate does not certify that entire product scope.
+Backend Phases 6–8 are complete. The frontend now offers a separate Image history
+workspace for saved spaces, four-image uploads, rig imports, review and approved
+history. Follow the [integrated startup and operator guide](docs/frontend-integration.md)
+for the local frontend on **3101**, Scene Tracker on **8001**, and camera edge on **8002**.
+Real PointDiT generation remains Phase 9.
 
 ## Local development
 

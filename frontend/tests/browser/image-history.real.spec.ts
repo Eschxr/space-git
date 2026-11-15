@@ -1,0 +1,40 @@
+/** Manual opt-in smoke: uses local pretrained models, never downloads or approves changes. */
+import {expect, test} from '@playwright/test';
+import path from 'node:path';
+
+test('real images traverse browser upload, Linux worker and signed review evidence', async ({page, request}, info) => {
+  const directory = process.env.SPACEGIT_REAL_IMAGES;
+  test.skip(!directory || process.env.SPACEGIT_RUN_REAL_SMOKE !== '1', 'Manual only: provide four local cam_01.jpg..cam_04.jpg files and a real-model API/worker.');
+  test.setTimeout(600000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/image-history');
+  await page.getByLabel('New space name').fill('Real inference smoke ' + new Date().toISOString());
+  const created = page.waitForResponse(response => response.url().endsWith('/api/v1/environments') && response.request().method() === 'POST', {timeout: 30000});
+  await page.getByRole('button', {name: 'Create space', exact: true}).click();
+  expect((await created).status()).toBe(201);
+  for (let index = 0; index < 4; index++) await page.locator('input[type=file]').nth(index).setInputFiles(path.join(directory!, `cam_0${index + 1}.jpg`));
+  const uploaded = page.waitForResponse(response => /\/environments\/[^/]+\/captures$/.test(response.url()) && response.request().method() === 'POST', {timeout: 30000});
+  await page.getByRole('button', {name: 'Upload four images', exact: true}).click();
+  const upload = await uploaded; expect(upload.status()).toBe(201);
+  const capture = await upload.json();
+  await page.getByRole('button', {name: 'Run inference', exact: true}).click();
+  await expect(page.getByText('Real model run · succeeded', {exact: true})).toBeVisible({timeout: 540000});
+  await expect(page.getByRole('heading', {name: /Review proposed changes/})).toBeVisible();
+  await expect(page.locator('.ih-proposal').first().getByRole('link', {name: 'Download mask RLE JSON', exact: true})).toBeVisible();
+  await expect(page.locator('.ih-proposal option[value="mask"]')).toHaveCount(0);
+  const workflowResponse = await request.get('http://127.0.0.1:8001/api/v1/captures/' + capture.id + '/workflow');
+  expect(workflowResponse.ok()).toBe(true);
+  const workflow = await workflowResponse.json();
+  expect(workflow.latest_run.provider).toBe('real'); expect(workflow.latest_run.inference_performed).toBe(true);
+  expect(workflow.outcome).toBe('pending_review'); expect(workflow.observed_tracks.length).toBeGreaterThan(0);
+  expect(workflow.latest_run.committed_revision_ids).toEqual([]);
+  await expect(page.locator('.ih-sources img')).toHaveCount(4);
+  await expect.poll(() => page.locator('.ih-sources img').evaluateAll(images => images.length === 4 && images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
+  await expect(page.getByRole('button', {name: 'Commit selected changes', exact: true})).toBeDisabled();
+  await page.screenshot({path: info.outputPath('real-inference-desktop.png')});
+  await page.locator('.ih-proposal').first().screenshot({path: info.outputPath('real-proposal.png')});
+  await page.setViewportSize({width: 390, height: 844});
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  await info.attach('real-workflow.json', {body: JSON.stringify({environment_id: capture.environment_id, capture_id: capture.id, run: workflow.latest_run, observed_tracks: workflow.observed_tracks.length, outcome: workflow.outcome}, null, 2), contentType: 'application/json'});
+});

@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import type {Live,Pair} from '../../../../packages/protocol/types';
-import {api,type Wizard} from './connection';
+import {api,apiBase,type Wizard} from './connection';
 import {Icon} from './icons';
 import {LensTool,PhysicalDiagnostics,ResidualPlot,type Lens,type Residual} from './calibration-tools';
 
@@ -25,7 +25,7 @@ export function CameraPreview({token,onPoint,wallAspect,projection=false,outline
   let done=false,current='',timer:ReturnType<typeof setTimeout>;
   const loop=async()=>{
    try{const query=projection?'?projection=true':wallAspect===undefined?'':'?wall_aspect='+wallAspect;
-    const r=await fetch('http://127.0.0.1:8000/api/v1/preview'+query,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(2500),cache:'no-store'});
+    const r=await fetch(apiBase()+'/api/v1/preview'+query,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(2500),cache:'no-store'});
     if(!r.ok)throw Error(); const blob=await r.blob(); if(done)return;
     const previous=current;current=URL.createObjectURL(blob);set(current);fail(false);if(previous)URL.revokeObjectURL(previous);
    }catch{if(!done)fail(true);}

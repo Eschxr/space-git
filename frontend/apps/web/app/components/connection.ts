@@ -63,7 +63,7 @@ export function useToken(){
  }
  return [key||(automatic?session:''),setToken,connectLocal] as const;
 }
-export const apiBase=()=>localHost()?'http://127.0.0.1:8000':'';
+export const apiBase=()=>localHost()?(process.env.NEXT_PUBLIC_SPACEGIT_EDGE_URL || 'http://127.0.0.1:8000').replace(/\/$/,''):'';
 export async function api<T>(token:string,path:string,body?:unknown,method?:string,timeoutMs=12000):Promise<T>{
  if(!localHost()) throw Error('Local edge controls are available on the projector workstation.');
  const r=await fetch(apiBase()+'/api/v1'+path,{headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(timeoutMs),cache:'no-store'});
@@ -77,7 +77,9 @@ export function useLive(token:string,maxSilence=1000){
   if(!token||!localHost())return;
   let done=false, last=0, device='', retry:ReturnType<typeof setTimeout>, ws:WebSocket, received=0;
   const connect=()=>{
-   ws=new WebSocket('ws://127.0.0.1:8000/ws/live','spacegit.v1');
+   const endpoint=new URL('/ws/live',apiBase());
+   endpoint.protocol=endpoint.protocol==='https:'?'wss:':'ws:';
+   ws=new WebSocket(endpoint,'spacegit.v1');
    ws.onopen=()=>ws.send(token);
    ws.onmessage=e=>{try{const n:Live=JSON.parse(e.data);if(!n||n.version!==1)return;
     if(n.device!==device){device=n.device;last=0;}

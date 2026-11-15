@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
+from starlette.middleware.cors import CORSMiddleware
 
 from scene_tracker.api.limits import UploadLimitMiddleware
 from scene_tracker.api.routes.captures import router
@@ -32,6 +33,13 @@ def create_app(settings=None, services=None):
     app.state.services_lock = Lock()
     app.add_middleware(
         UploadLimitMiddleware, max_bytes=4 * app.state.settings.max_image_bytes + 65536
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app.state.settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+        expose_headers=["X-Correlation-ID"],
     )
     app.include_router(router)
     app.include_router(revisions_router)

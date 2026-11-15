@@ -25,6 +25,12 @@ class EnvironmentResponse(BaseModel):
     created_at: AwareDatetime
 
 
+class EnvironmentPage(BaseModel):
+    items: list[EnvironmentResponse]
+    limit: int
+    offset: int
+
+
 class FrameResponse(BaseModel):
     id: UUID
     capture_id: UUID

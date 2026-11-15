@@ -14,6 +14,7 @@ from scene_tracker.api.schemas.captures import (
     DebugResponse,
     DetectionPage,
     EnvironmentCreate,
+    EnvironmentPage,
     EnvironmentResponse,
     ProcessRequest,
     RunResponse,
@@ -55,6 +56,19 @@ MULTIPART = {
 @router.post("/environments", response_model=EnvironmentResponse, status_code=201)
 def create_environment(body: EnvironmentCreate, services: ServicesDep):
     return services.repository.create_environment(body.name, body.prompts)
+
+
+@router.get("/environments", response_model=EnvironmentPage)
+def list_environments(
+    services: ServicesDep,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": services.repository.list_environments(limit, offset),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post(

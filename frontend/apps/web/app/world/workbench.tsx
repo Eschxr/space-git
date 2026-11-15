@@ -245,6 +245,7 @@ export default function World({projector=false}:{projector?:boolean}) {
     </header>
     <div className="nw-nav-wrap"><nav className="nw-shell nw-nav" aria-label="New Worlds workflow">
       {VIEWS.map((v,i)=><button key={v.id} onClick={()=>navigate(v.id)} aria-current={view===v.id?'page':undefined}><span className="nw-step-no">0{i+1}</span><Icon name={v.icon} size={16}/>{v.label}</button>)}
+      <Link href="/image-history" className="nw-history-link"><Icon name="history" size={16}/>Image history</Link>
     </nav></div>
     <main className="nw-shell nw-main">
       {walkthrough&&<section className="nw-guide" aria-label="Guided demo">

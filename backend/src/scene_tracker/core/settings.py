@@ -21,7 +21,16 @@ class Settings(BaseSettings):
     s3_access_key: SecretStr = SecretStr("scene_tracker")
     s3_secret_key: SecretStr = SecretStr("local-dev-change-me")
     s3_bucket: str = "scene-tracker"
+    s3_region: str = "us-east-1"
     public_objectstore_endpoint: str = "localhost:9000"
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3101",
+            "http://127.0.0.1:3101",
+        ]
+    )
     model_cache_dir: Path = Path("models")
     vision: VisionSettings = Field(default_factory=VisionSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)

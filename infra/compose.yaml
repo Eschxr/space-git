@@ -59,7 +59,67 @@ services:
         mcli mb --ignore-existing "local/$${S3_BUCKET}"
         mcli anonymous set none "local/$${S3_BUCKET}"
     restart: 'no'
+  migrate:
+    profiles: [application]
+    image: scene-tracker-backend:local
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file: ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: [alembic, upgrade, head]
+    restart: 'no'
+  api:
+    profiles: [application]
+    image: scene-tracker-backend:local
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file: ../.env
+    environment: &application-env
+      S3_ENDPOINT: silo:9000
+      PUBLIC_OBJECTSTORE_ENDPOINT: ${PUBLIC_OBJECTSTORE_ENDPOINT:-127.0.0.1:9000}
+      YOLOE_CHECKPOINT: /models/checkpoints/yoloe-11s-seg-pf.pt
+      VISION_DINOV2_CHECKPOINT: /models/checkpoints/dinov2_vits14_pretrain.pth
+      VISION_DINOV2_SOURCE_DIR: /models/sources/dinov2
+      MODEL_CACHE_DIR: /model-cache
+      YOLOE_DEVICE: cpu
+      VISION_DEVICE: cpu
+    volumes: &application-volumes
+      - ${SCENE_TRACKER_MODELS_DIR:-../models/real-inference}:/models:ro
+      - model_cache:/model-cache
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      silo-init:
+        condition: service_completed_successfully
+    command: [uvicorn, scene_tracker.api.main:app, --host, 0.0.0.0, --port, '8000']
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  vision-worker:
+    profiles: [application]
+    image: scene-tracker-backend:local
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file: ../.env
+    environment: *application-env
+    volumes: *application-volumes
+    depends_on:
+      api:
+        condition: service_healthy
+    command: [scene-tracker, worker, vision]
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  model_cache:

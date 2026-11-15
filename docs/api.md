@@ -7,11 +7,17 @@ The service assumes one local operator without authentication. Bind to loopback.
 | Method | Route | Behavior |
 |---|---|---|
 | POST | `/api/v1/environments` | JSON `{ "name": "room" }`; returns 201 with UUID |
+| GET | `/api/v1/environments` | Saved spaces, newest creation first then UUID; paginated `limit` (1–100, default 50) and nonnegative `offset` |
 | POST | `/api/v1/environments/{id}/captures` | Four-file multipart ingestion; returns 201 |
 | GET | `/api/v1/environments/{id}/captures` | Capture summaries, `limit` (1–100, default 50) and `offset` (default 0) |
 | GET | `/api/v1/captures/{id}` | Capture status, timestamps, warnings/errors and frames |
 | POST | `/api/v1/captures/{id}/process` | JSON `{ "preset": "fake-fixture", "retry": false }`; returns 202 with run and job |
 | GET | `/api/v1/processing-runs/{id}` | Durable status, progress, manifest, timing and errors |
+
+`GET /environments` returns `{items: [{id, name, prompts, created_at}], limit, offset}`.
+The [frontend integration guide](frontend-integration.md) maps the complete UI,
+exact CORS origins and internal/browser object-store endpoints. In the integrated
+configuration Scene Tracker uses port 8001, separately from the camera edge.
 
 ## Capture uploads
 

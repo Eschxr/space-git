@@ -1,0 +1,563 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Multi-camera PLY rig</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#111;color:#ddd;font:13px system-ui,sans-serif}
+  #panel{position:fixed;top:12px;left:12px;width:270px;max-height:calc(100% - 24px);overflow:auto;
+         padding:12px;background:rgba(28,28,28,.92);border-radius:8px;z-index:10}
+  h3{margin:0 0 8px;font-size:14px} h4{margin:12px 0 6px;font-size:12px;color:#aaa;text-transform:uppercase}
+  .row{margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .row input[type=range]{flex:1}
+  button,label.btn,select{background:#3a3a3a;color:#eee;border:0;border-radius:4px;padding:5px 9px;cursor:pointer;font:inherit}
+  button:hover,label.btn:hover{background:#505050}
+  .camtabs{display:flex;gap:6px}
+  .camtabs button{flex:1;border-bottom:3px solid transparent}
+  .camtabs button.active{background:#555}
+  #info{color:#999;font-size:12px;line-height:1.4;margin-top:6px}
+  #pipFrame{position:fixed;right:12px;bottom:12px;width:320px;height:240px;border:2px solid #888;
+            pointer-events:none;box-sizing:border-box}
+  #pipLabel{position:absolute;top:2px;left:6px;font-size:11px;color:#fff;text-shadow:0 0 3px #000}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h3>Multi-camera PLY rig</h3>
+  <div class="row"><label><input type="checkbox" id="editMode" checked> Edit mode (Q)</label>
+    <label><input type="checkbox" id="pip" checked> Camera view</label></div>
+  <div class="row">
+    <span>Gizmo</span>
+    <span>
+      <button id="mTrans">Move (W)</button>
+      <button id="mRot">Rotate (E)</button>
+    </span>
+  </div>
+  <div class="row"><label><input type="checkbox" id="local" checked> Local space</label>
+    <label><input type="checkbox" id="snap"> Snap</label></div>
+
+  <h4>Camera (keys 1-4)</h4>
+  <div class="camtabs" id="tabs"></div>
+
+  <div class="row">
+    <label class="btn">Load PLY<input id="file" type="file" accept=".ply" hidden></label>
+    <button id="clear">Remove PLY</button>
+  </div>
+  <div class="row"><span>Show cloud</span><input type="checkbox" id="showCloud" checked></div>
+  <div class="row"><span>Cloud scale</span><input id="scale" type="range" min="-2" max="2" step="0.01" value="0"></div>
+  <div class="row"><span>Point size</span><input id="size" type="range" min="0.1" max="10" step="0.1" value="1"></div>
+  <div class="row"><span>FOV</span><input id="fov" type="range" min="20" max="120" step="1" value="60"></div>
+  <div class="row"><span>Frustum depth</span><input id="depth" type="range" min="0.5" max="20" step="0.1" value="4"></div>
+  <div class="row"><span>PLY axes</span>
+    <select id="conv">
+      <option value="cv">OpenCV (x right, y down, z fwd)</option>
+      <option value="gl">OpenGL (y up, -z fwd)</option>
+      <option value="yz">y up, +z fwd</option>
+    </select></div>
+
+  <h4>Denoise (this camera)</h4>
+  <div class="row"><span>Enable</span><input type="checkbox" id="dnOn"></div>
+  <div class="row"><span>Radius</span><input id="dnRadius" type="range" min="0.002" max="0.05" step="0.001" value="0.01"></div>
+  <div class="row"><span>Min neighbours</span><input id="dnMin" type="range" min="1" max="30" step="1" value="6"></div>
+  <div class="row"><span>Voxel thin</span><input id="dnVoxel" type="range" min="0" max="0.02" step="0.0005" value="0"></div>
+
+  <h4>Scene</h4>
+  <div class="row"><span>Background</span><input id="bg" type="color" value="#111111"></div>
+  <div class="row"><button id="exportJson">Save config (JSON)</button>
+    <label class="btn">Load config<input id="importJson" type="file" accept=".json" hidden></label></div>
+  <div class="row"><button id="exportPly">Export merged PLY</button></div>
+  <div id="info">Click a cuboid or press 1-4 to select. Drag the gizmo to move or rotate.</div>
+</div>
+<div id="pipFrame"><div id="pipLabel"></div></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+const $ = id => document.getElementById(id);
+const COLORS = [0xff5555, 0x55dd55, 0x5599ff, 0xffcc33];
+const PIP_W = 320, PIP_H = 240;
+
+const DEFAULTS = [
+  { name: 'Camera 1',
+    position: [2.0303844158463424, 1.3185030354800185, 0.016687318383022287],
+    quaternion: [-0.6344741234440691, 0.3105238983473806, -0.30584370774087866, -0.6383393467978751],
+    fov: 60, cloudScale: 1.2302687708123816, plyAxes: 'cv' },
+  { name: 'Camera 2',
+    position: [2.628078949659335, 1.4651817024471898, -0.035668614958830926],
+    quaternion: [-0.5882957786184012, 0.38056879462805776, -0.6269024748464743, -0.34068865030476464],
+    fov: 73, cloudScale: 1.0715193052376064, plyAxes: 'cv' },
+  { name: 'Camera 3',
+    position: [1.6485774028365667, 1.0482525292035438, 0.4128356317547338],
+    quaternion: [0.35137475977970123, 0.4662838807374495, -0.7889379866511383, 0.19155149170139496],
+    fov: 60, cloudScale: 1, plyAxes: 'cv' },
+  { name: 'Camera 4',
+    position: [1.6919669940801103, 1.246327430505611, -0.7716833161145027],
+    quaternion: [0.8342134893798134, 0.11265757406014404, -0.19541696163731198, 0.503198108351055],
+    fov: 60, cloudScale: 1, plyAxes: 'cv' }
+];
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#111111');
+const view = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 1000);
+view.position.set(6, 5, 8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+const orbit = new OrbitControls(view, renderer.domElement);
+orbit.enableDamping = true;
+
+const grid = new THREE.GridHelper(20, 20, 0x666666, 0x333333);
+const axes = new THREE.AxesHelper(1);
+scene.add(grid, axes);
+
+const tc = new TransformControls(view, renderer.domElement);
+tc.addEventListener('dragging-changed', e => orbit.enabled = !e.value);
+const tcHelper = tc.getHelper();
+scene.add(tcHelper);
+
+const cams = [];
+for (let i = 0; i < 4; i++) {
+  const color = COLORS[i];
+  const rig = new THREE.Group();
+  scene.add(rig);
+
+  const boxGeo = new THREE.BoxGeometry(0.25, 0.18, 0.6);
+  boxGeo.translate(0, 0, 0.3);
+  const box = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color }));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo),
+    new THREE.LineBasicMaterial({ color: 0xffffff }));
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  top.position.set(0, 0.12, 0.35);
+  box.add(edges, top);
+  box.userData.index = i;
+  rig.add(box);
+
+  const cam = new THREE.PerspectiveCamera(60, PIP_W / PIP_H, 0.05, 4);
+  rig.add(cam);
+  const helper = new THREE.CameraHelper(cam);
+  helper.setColors(new THREE.Color(color), new THREE.Color(color), new THREE.Color(color),
+                   new THREE.Color(0xffffff), new THREE.Color(0x888888));
+  scene.add(helper);
+
+  const pivot = new THREE.Group();
+  rig.add(pivot);
+
+  const d = DEFAULTS[i];
+  rig.position.fromArray(d.position);
+  rig.quaternion.fromArray(d.quaternion);
+
+  cams.push({
+    rig, box, cam, helper, pivot, points: null, src: null, R: 1, baseSize: 0.01,
+    name: d.name, fov: d.fov, depth: 4, scaleExp: Math.log10(d.cloudScale),
+    size: 1, conv: d.plyAxes, showCloud: true,
+    dn: { on: false, radius: 0.01, minN: 6, voxel: 0 }
+  });
+}
+
+let sel = 0;
+let editMode = true;
+
+function applyConv(c) {
+  c.pivot.rotation.set(0, 0, 0);
+  if (c.conv === 'cv') c.pivot.rotation.x = Math.PI;
+  if (c.conv === 'yz') c.pivot.rotation.y = Math.PI;
+}
+function applyCam(c) {
+  c.cam.fov = c.fov; c.cam.far = c.depth; c.cam.near = 0.05;
+  c.cam.updateProjectionMatrix();
+  c.helper.update();
+}
+function applyCloud(c) {
+  c.pivot.scale.setScalar(Math.pow(10, c.scaleExp));
+  c.pivot.visible = c.showCloud;
+  if (c.points) c.points.material.size = c.baseSize * c.size;
+}
+
+function refreshUI() {
+  const c = cams[sel];
+  [...$('tabs').children].forEach((b, i) => b.classList.toggle('active', i === sel));
+  $('scale').value = c.scaleExp; $('size').value = c.size; $('fov').value = c.fov;
+  $('depth').value = c.depth; $('conv').value = c.conv; $('showCloud').checked = c.showCloud;
+  $('dnOn').checked = c.dn.on; $('dnRadius').value = c.dn.radius;
+  $('dnMin').value = c.dn.minN; $('dnVoxel').value = c.dn.voxel;
+  $('pipLabel').textContent = c.name + ' view';
+  $('info').textContent = c.points
+    ? `${c.name}: ${c.points.geometry.getAttribute('position').count.toLocaleString()} points`
+    : `${c.name}: no PLY loaded`;
+  if (editMode) tc.attach(c.rig);
+}
+
+function select(i) { sel = i; refreshUI(); }
+
+cams.forEach((c, i) => {
+  const b = document.createElement('button');
+  b.textContent = i + 1;
+  b.style.borderBottomColor = '#' + COLORS[i].toString(16).padStart(6, '0');
+  b.onclick = () => select(i);
+  $('tabs').appendChild(b);
+});
+
+function setEdit(on) {
+  editMode = on;
+  $('editMode').checked = on;
+  cams.forEach(c => { c.box.visible = on; c.helper.visible = on; });
+  grid.visible = on; axes.visible = on;
+  tcHelper.visible = on;
+  if (on) tc.attach(cams[sel].rig); else tc.detach();
+}
+
+function robustRadius(pos, n) {
+  let cx = 0, cy = 0, cz = 0, m = 0;
+  for (let i = 0; i < n; i++) {
+    const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
+    if (!isFinite(x + y + z)) continue;
+    cx += x; cy += y; cz += z; m++;
+  }
+  if (!m) return 1;
+  cx /= m; cy /= m; cz /= m;
+  const d = new Float32Array(m); let k = 0;
+  for (let i = 0; i < n; i++) {
+    const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
+    if (!isFinite(x + y + z)) continue;
+    d[k++] = Math.hypot(x - cx, y - cy, z - cz);
+  }
+  d.sort();
+  return d[Math.floor(m * 0.9)] || 1;
+}
+
+function filterCloud(c) {
+  const src = c.src, o = c.dn;
+  const P = src.getAttribute('position'), C = src.getAttribute('color');
+  const n = P.count, pa = P.array;
+  let keep = [];
+  for (let i = 0; i < n; i++) {
+    if (isFinite(pa[i*3] + pa[i*3+1] + pa[i*3+2])) keep.push(i);
+  }
+  if (o.on && o.voxel > 0) {
+    const vs = o.voxel * c.R, seen = new Set(), next = [];
+    for (const i of keep) {
+      const key = (Math.floor(pa[i*3]/vs) + 2048) * 16777216 +
+                  (Math.floor(pa[i*3+1]/vs) + 2048) * 4096 +
+                  (Math.floor(pa[i*3+2]/vs) + 2048);
+      if (!seen.has(key)) { seen.add(key); next.push(i); }
+    }
+    keep = next;
+  }
+  if (o.on && o.minN > 0) {
+    const r = o.radius * c.R, r2 = r * r, grid = new Map();
+    const cell = v => Math.floor(v / r);
+    const kf = (a, b, d) => (a + 2048) * 16777216 + (b + 2048) * 4096 + (d + 2048);
+    for (const i of keep) {
+      const key = kf(cell(pa[i*3]), cell(pa[i*3+1]), cell(pa[i*3+2]));
+      let arr = grid.get(key); if (!arr) grid.set(key, arr = []);
+      arr.push(i);
+    }
+    const next = [];
+    for (const i of keep) {
+      const x = pa[i*3], y = pa[i*3+1], z = pa[i*3+2];
+      const cx = cell(x), cy = cell(y), cz = cell(z);
+      let count = 0;
+      for (let a = -1; a <= 1 && count < o.minN; a++)
+        for (let b = -1; b <= 1 && count < o.minN; b++)
+          for (let d = -1; d <= 1 && count < o.minN; d++) {
+            const arr = grid.get(kf(cx + a, cy + b, cz + d));
+            if (!arr) continue;
+            for (const j of arr) {
+              if (j === i) continue;
+              const dx = pa[j*3]-x, dy = pa[j*3+1]-y, dz = pa[j*3+2]-z;
+              if (dx*dx + dy*dy + dz*dz <= r2 && ++count >= o.minN) break;
+            }
+          }
+      if (count >= o.minN) next.push(i);
+    }
+    keep = next;
+  }
+  const m = keep.length;
+  const outP = new Float32Array(m * 3), outC = C ? new Float32Array(m * 3) : null;
+  for (let k = 0; k < m; k++) {
+    const i = keep[k];
+    outP[k*3] = pa[i*3]; outP[k*3+1] = pa[i*3+1]; outP[k*3+2] = pa[i*3+2];
+    if (C) { outC[k*3] = C.getX(i); outC[k*3+1] = C.getY(i); outC[k*3+2] = C.getZ(i); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(outP, 3));
+  if (C) g.setAttribute('color', new THREE.BufferAttribute(outC, 3));
+  return { g, kept: m, total: n };
+}
+
+function rebuildCloud(c) {
+  if (!c.src) return;
+  const { g, kept, total } = filterCloud(c);
+  const hasColor = !!g.getAttribute('color');
+  if (c.points) { c.pivot.remove(c.points); c.points.geometry.dispose(); c.points.material.dispose(); }
+  c.points = new THREE.Points(g, new THREE.PointsMaterial({
+    size: c.baseSize * c.size, sizeAttenuation: true, vertexColors: hasColor }));
+  c.pivot.add(c.points);
+  applyConv(c); applyCloud(c);
+  $('info').textContent = `${c.name}: ${kept.toLocaleString()} of ${total.toLocaleString()} points` +
+    (hasColor ? ' (with colors)' : ' (no vertex colors)');
+}
+
+function loadPly(buffer) {
+  const c = cams[sel];
+  if (c.src) c.src.dispose();
+  c.src = new PLYLoader().parse(buffer);
+  const P = c.src.getAttribute('position');
+  c.R = robustRadius(P.array, P.count);
+  c.baseSize = c.R * 0.004;
+  rebuildCloud(c);
+}
+
+$('file').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { loadPly(await f.arrayBuffer()); }
+  catch (err) { $('info').textContent = 'Failed to read PLY: ' + err.message; }
+  e.target.value = '';
+};
+$('clear').onclick = () => {
+  const c = cams[sel];
+  if (c.points) { c.pivot.remove(c.points); c.points.geometry.dispose(); c.points.material.dispose(); c.points = null; }
+  if (c.src) { c.src.dispose(); c.src = null; }
+  refreshUI();
+};
+$('showCloud').onchange = e => { cams[sel].showCloud = e.target.checked; applyCloud(cams[sel]); };
+$('scale').oninput = e => { cams[sel].scaleExp = +e.target.value; applyCloud(cams[sel]); };
+$('size').oninput = e => { cams[sel].size = +e.target.value; applyCloud(cams[sel]); };
+$('fov').oninput = e => { cams[sel].fov = +e.target.value; applyCam(cams[sel]); };
+$('depth').oninput = e => { cams[sel].depth = +e.target.value; applyCam(cams[sel]); };
+$('conv').onchange = e => { cams[sel].conv = e.target.value; applyConv(cams[sel]); };
+$('bg').oninput = e => scene.background = new THREE.Color(e.target.value);
+$('editMode').onchange = e => setEdit(e.target.checked);
+$('pip').onchange = () => $('pipFrame').style.display = $('pip').checked ? 'block' : 'none';
+$('mTrans').onclick = () => tc.setMode('translate');
+$('mRot').onclick = () => tc.setMode('rotate');
+$('local').onchange = e => tc.setSpace(e.target.checked ? 'local' : 'world');
+$('snap').onchange = e => {
+  tc.setTranslationSnap(e.target.checked ? 0.1 : null);
+  tc.setRotationSnap(e.target.checked ? THREE.MathUtils.degToRad(5) : null);
+};
+tc.setSpace('local');
+
+const dnApply = () => {
+  const c = cams[sel];
+  c.dn.on = $('dnOn').checked;
+  c.dn.radius = +$('dnRadius').value;
+  c.dn.minN = +$('dnMin').value;
+  c.dn.voxel = +$('dnVoxel').value;
+  rebuildCloud(c);
+};
+['dnOn', 'dnRadius', 'dnMin', 'dnVoxel'].forEach(id => $(id).onchange = dnApply);
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key >= '1' && e.key <= '4') select(+e.key - 1);
+  if (e.key === 'w' || e.key === 'W') tc.setMode('translate');
+  if (e.key === 'e' || e.key === 'E') tc.setMode('rotate');
+  if (e.key === 'q' || e.key === 'Q') setEdit(!editMode);
+});
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!editMode || tc.dragging) return;
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, view);
+  const hits = ray.intersectObjects(cams.map(c => c.box), false);
+  if (hits.length) select(hits[0].object.userData.index);
+});
+
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.download = name; a.click();
+}
+
+$('exportJson').onclick = () => {
+  const out = {
+    version: 2,
+    background: '#' + scene.background.getHexString(),
+    editMode,
+    gizmo: { mode: tc.mode, local: $('local').checked, snap: $('snap').checked },
+    selected: sel,
+    cameraView: { position: view.position.toArray(), target: orbit.target.toArray() },
+    cameras: cams.map(c => ({
+      name: c.name,
+      position: c.rig.position.toArray(),
+      quaternion: c.rig.quaternion.toArray(),
+      fov: c.fov,
+      frustumDepth: c.depth,
+      cloudScale: Math.pow(10, c.scaleExp),
+      pointSize: c.size,
+      plyAxes: c.conv,
+      showCloud: c.showCloud,
+      denoise: { ...c.dn }
+    }))
+  };
+  download('camera_poses.json', JSON.stringify(out, null, 2));
+};
+
+$('importJson').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const list = Array.isArray(data) ? data : data.cameras;
+    list.forEach((d, i) => {
+      const c = cams[i]; if (!c) return;
+      if (d.position) c.rig.position.fromArray(d.position);
+      if (d.quaternion) c.rig.quaternion.fromArray(d.quaternion);
+      if (d.name) c.name = d.name;
+      c.fov = d.fov ?? c.fov;
+      c.depth = d.frustumDepth ?? c.depth;
+      c.scaleExp = Math.log10(d.cloudScale ?? Math.pow(10, c.scaleExp));
+      c.size = d.pointSize ?? c.size;
+      c.conv = d.plyAxes ?? c.conv;
+      c.showCloud = d.showCloud ?? c.showCloud;
+      if (d.denoise) Object.assign(c.dn, d.denoise);
+      applyConv(c); applyCam(c);
+      if (c.src) rebuildCloud(c); else applyCloud(c);
+    });
+    if (!Array.isArray(data)) {
+      if (data.background) { scene.background = new THREE.Color(data.background); $('bg').value = data.background; }
+      if (data.gizmo) {
+        tc.setMode(data.gizmo.mode || 'translate');
+        $('local').checked = data.gizmo.local ?? true; tc.setSpace($('local').checked ? 'local' : 'world');
+        $('snap').checked = data.gizmo.snap ?? false; $('snap').onchange({ target: $('snap') });
+      }
+      if (data.cameraView) {
+        view.position.fromArray(data.cameraView.position);
+        orbit.target.fromArray(data.cameraView.target);
+        orbit.update();
+      }
+      if (typeof data.selected === 'number') sel = data.selected;
+      if (typeof data.editMode === 'boolean') setEdit(data.editMode);
+    }
+    refreshUI();
+    $('info').textContent = `Loaded config for ${list.length} cameras. Now load each camera's PLY.`;
+  } catch (err) {
+    $('info').textContent = 'Failed to read config: ' + err.message;
+  }
+  e.target.value = '';
+};
+
+$('exportPly').onclick = async () => {
+  let handle = null;
+  try {
+    if (window.showSaveFilePicker) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: 'merged_pointcloud.ply',
+        types: [{ description: 'PLY point cloud', accept: { 'application/octet-stream': ['.ply'] } }]
+      });
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    console.error(err);
+  }
+
+  try {
+    $('info').textContent = 'Building PLY...';
+    await new Promise(r => setTimeout(r, 30));
+    scene.updateMatrixWorld(true);
+
+    const active = cams.filter(c => c.points && c.showCloud);
+    const total = active.reduce((s, c) => s + c.points.geometry.getAttribute('position').count, 0);
+    if (!total) { $('info').textContent = 'No clouds to export.'; return; }
+
+    const header = new TextEncoder().encode(
+      `ply\nformat binary_little_endian 1.0\nelement vertex ${total}\n` +
+      `property float x\nproperty float y\nproperty float z\n` +
+      `property uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`);
+    const stride = 15;
+    const buf = new ArrayBuffer(header.length + total * stride);
+    new Uint8Array(buf).set(header, 0);
+    const dv = new DataView(buf);
+    const v = new THREE.Vector3();
+    let off = header.length;
+
+    for (const c of active) {
+      const pos = c.points.geometry.getAttribute('position');
+      const col = c.points.geometry.getAttribute('color');
+      const mw = c.points.matrixWorld;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(mw);
+        dv.setFloat32(off, v.x, true);
+        dv.setFloat32(off + 4, v.y, true);
+        dv.setFloat32(off + 8, v.z, true);
+        dv.setUint8(off + 12, col ? Math.round(col.getX(i) * 255) : 255);
+        dv.setUint8(off + 13, col ? Math.round(col.getY(i) * 255) : 255);
+        dv.setUint8(off + 14, col ? Math.round(col.getZ(i) * 255) : 255);
+        off += stride;
+      }
+    }
+
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    if (handle) {
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'merged_pointcloud.ply';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }
+    $('info').textContent = `Exported ${total.toLocaleString()} points (${(blob.size / 1e6).toFixed(1)} MB).`;
+  } catch (err) {
+    console.error(err);
+    $('info').textContent = 'Export failed: ' + err.message;
+  }
+};
+
+addEventListener('resize', () => {
+  view.aspect = innerWidth / innerHeight;
+  view.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+cams.forEach(c => { applyConv(c); applyCam(c); applyCloud(c); });
+setEdit(true);
+refreshUI();
+
+renderer.setAnimationLoop(() => {
+  orbit.update();
+  cams.forEach(c => c.helper.update());
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+  renderer.render(scene, view);
+
+  if ($('pip').checked) {
+    const c = cams[sel];
+    const hidden = [grid, axes, tcHelper, ...cams.map(k => k.helper), ...cams.map(k => k.box)];
+    const prev = hidden.map(o => o.visible);
+    hidden.forEach(o => o.visible = false);
+    const x = innerWidth - PIP_W - 12, y = 12;
+    renderer.setScissorTest(true);
+    renderer.setViewport(x, y, PIP_W, PIP_H);
+    renderer.setScissor(x, y, PIP_W, PIP_H);
+    c.cam.aspect = PIP_W / PIP_H; c.cam.updateProjectionMatrix();
+    renderer.render(scene, c.cam);
+    renderer.setScissorTest(false);
+    hidden.forEach((o, i) => o.visible = prev[i]);
+  }
+});
+</script>
+</body>
+</html>

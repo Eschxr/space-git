@@ -394,6 +394,26 @@ def test_camera_tracks_miss_reappear_and_reference_validation(api):
     _, _, restored = process_fixture()
     assert {s["view_track_id"] for s in restored} == {s["view_track_id"] for s in states1}
     assert all(s["missing_count"] == 0 and s["before_missing_count"] == 1 for s in restored)
+    track_id = states1[0]["view_track_id"]
+    registry = api.client.get(f"/api/v1/view-tracks/{track_id}")
+    assert registry.status_code == 200 and registry.json()["missing_count"] == 0
+    history = api.client.get(f"/api/v1/view-tracks/{track_id}/history").json()
+    assert len(history["items"]) == 4
+    assert [r["state"]["status"] for r in history["items"]] == [
+        "observed",
+        "observed",
+        "unobserved",
+        "observed",
+    ]
+    assert all(
+        r["run_status"] == "succeeded" and r["camera_id"] == registry.json()["camera_id"]
+        for r in history["items"]
+    )
+    page = api.client.get(f"/api/v1/view-tracks/{track_id}/history?limit=1&offset=2").json()
+    assert len(page["items"]) == 1 and page["items"][0]["state"]["missing_count"] == 1
+    assert api.client.get(f"/api/v1/view-tracks/{uuid4()}/history").status_code == 404
+    assert api.client.get(f"/api/v1/view-tracks/{track_id}/history?limit=101").status_code == 422
+
     groups = {c: {s["view_track_id"] for s in restored if s["camera_id"] == c} for c in CameraID}
     assert sum(len(x) for x in groups.values()) == len(set.union(*groups.values()))
     with api.engine.connect() as conn:
@@ -716,3 +736,90 @@ def test_full_fake_refactor_e2e(api, tmp_path):
             indent=2,
         )
     )
+
+
+def test_phase5_prototype_survives_missing_embedding_and_persists_diagnostics(api):
+    import json
+
+    from scene_tracker.application.vision_pipeline import process_fake
+    from scene_tracker.infrastructure.db.models import view_track_snapshots
+
+    env_id = str(api.services.repository.create_environment("prototype gap")["id"])
+    first, run1, _ = sequence_capture(api, env_id)
+    store = api.services.store_factory(UUID(env_id))
+    with api.engine.connect() as conn:
+        first_states = [
+            dict(r.state)
+            for r in conn.execute(
+                select(view_track_snapshots).where(
+                    view_track_snapshots.c.run_id == UUID(run1["id"])
+                )
+            ).mappings()
+        ]
+    chair = next(
+        s
+        for s in first_states
+        if s["camera_id"] == "cam_01" and s["observation"]["label"] == "chair"
+    )
+    prototype = chair["appearance_prototype"]
+    old_bytes = store.get(store.stat(prototype["embedding_key"]))
+    uploaded = api.client.post(
+        f"/api/v1/environments/{env_id}/captures",
+        files=[
+            (
+                f["camera_id"],
+                (f"{f['camera_id']}.png", store.get(store.stat(f["storage_key"])), "image/png"),
+            )
+            for f in first["frames"]
+        ],
+    ).json()
+    gap_run = api.client.post(f"/api/v1/captures/{uploaded['id']}/process", json={}).json()
+
+    class MissingMask(FakeExtractor):
+        def extract(self, image, config):
+            boxes, masks = super().extract(image, config)
+            omitted = {b.id for b in boxes if b.camera_id == "cam_01" and b.label == "chair"}
+            return boxes, [m for m in masks if m.detection_id not in omitted]
+
+    api.services.dispatcher.drain(
+        lambda job, run: execute_vision(
+            api.services.repository,
+            UUID(job),
+            UUID(run),
+            stage=lambda r, c: process_fake(
+                api.services.repository, r, c, store, extractor=MissingMask()
+            ),
+        )
+    )
+    history_path = f"/api/v1/view-tracks/{chair['view_track_id']}/history"
+    gap = api.client.get(history_path).json()["items"][-1]["state"]
+    assert gap["observation"]["embedding_key"] is None
+    assert gap["appearance_prototype"] == prototype
+    assert gap["match"]["embedding_missing"] is True
+    second, run2, _ = sequence_capture(api, env_id, moved=True)
+    history = api.client.get(history_path).json()["items"]
+    assert len(history) == 3
+    restored = history[-1]["state"]
+    assert restored["observation"]["capture_id"] == second["id"]
+    assert restored["view_track_id"] == chair["view_track_id"]
+    assert restored["match"]["terms"]["appearance"] == pytest.approx(1, abs=1e-5)
+    assert restored["match"]["appearance_reference"] == prototype
+    assert restored["appearance_prototype"]["detection_id"] == restored["observation"]["id"]
+    assert history[0]["state"] == chair
+    assert store.get(store.stat(prototype["embedding_key"])) == old_bytes
+    assert api.services.repository.run(UUID(gap_run["id"]))["status"] == "succeeded"
+    artifact = next(
+        a
+        for a in api.services.repository.list_artifacts(UUID(run2["id"]))
+        if a["kind"] == "temporal_matches"
+    )
+    report = json.loads(store.get(store.stat(artifact["storage_key"])))
+    assert report["schema_version"] == 2
+    camera = report["cameras"]["cam_01"]
+    assert camera["reference_run_id"] == gap_run["id"]
+    assert camera["reference_kind"] == "processed_run"
+    assert camera["screening"]["tracks"] and camera["unmatched_cost"] > 0
+    assert all(c["reason_codes"] and c["cost_components"] for c in camera["candidates"])
+    again = api.client.post(f"/api/v1/captures/{second['id']}/process", json={}).json()
+    assert again["id"] == run2["id"]
+    assert len(api.client.get(history_path).json()["items"]) == 3

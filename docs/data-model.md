@@ -71,3 +71,11 @@ fresh upgrade/downgrade/re-upgrade and representative legacy event/revision pres
 Downgrading 0005 with new event types fails rather than deleting/converting those events;
 export/backup and explicit operator action are needed before a destructive rollback.
 No refactor test migrates or resets the development database.
+
+
+Phase 5 adds versioned JSON state fields to existing immutable run/revision snapshots:
+appearance-prototype references, run identity and snapshot schema version 2. Vectors
+stay in immutable binary blobs; source IDs, model, dimension and hash stay in JSON.
+Legacy snapshots remain unchanged and derive an optional prototype in memory. Registry
+columns remain advisory. No migration beyond 0005 is introduced by Phase 5. New track
+history APIs read existing snapshot rows with capture/run order and explicit run status.

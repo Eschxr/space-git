@@ -37,7 +37,7 @@ class ProcessingService:
                 "pipeline_version": "yoloe-fake-v1",
             }
         config["tracking"] = self.settings.tracking.model_dump()
-        config["pipeline_version"] += "-tracks-changes-v1"
+        config["pipeline_version"] += "-tracks-v2-changes-v1"
         if reference_capture_id is not None:
             current = self.repository.capture(capture_id)
             baseline = self.repository.capture(reference_capture_id)

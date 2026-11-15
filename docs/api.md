@@ -187,3 +187,28 @@ Missing events only highlight the last-visible capture, never the empty current 
 A missing mask is explicit, not a fabricated region. Other-environment revisions fail.
 See [highlight contract and synthetic exports](highlights.md) and
 [matching thresholds/review semantics](matching-and-diffs.md).
+
+
+## Camera-local track history (Phase 5)
+
+- `GET /api/v1/view-tracks/{id}` returns camera/environment, first-seen time,
+  advisory registry status, last-seen capture and missing count. Unknown IDs return 404.
+- `GET /api/v1/view-tracks/{id}/history?limit=50&offset=0` returns immutable run snapshots
+  in capture-time/run-start/ID order; limit is 1–100. Each item includes run/capture,
+  run status, camera, lifecycle state, match evidence and appearance-prototype refs.
+  Registry fields may advance; snapshot contents do not. Failed/running run snapshots
+  are explicitly tagged by `run_status`, not described as succeeded or approved.
+
+History is observational run history, separate from accepted revision history. A
+prototype is a reference to the last confidently associated stored embedding, with
+source capture/frame/detection/camera and hash/model metadata. It survives a missing
+mask/vector or missed observation; it does not fabricate a vector for that frame.
+Candidates trace the actual appearance reference used for comparison.
+
+`temporal_matches.json` now has schema version 2, including per-camera candidate costs,
+term contributions, gate/reject reasons, top-two valid scores/margins, eligible counts,
+chosen assignments and unmatched decisions. Accepted baselines use reference kind
+`accepted_revision` and its revision ID; they can combine several source runs, so a
+single `reference_run_id` is not claimed for those comparisons. Historical v1 artifacts
+remain readable. The processing version changed so old successful results are preserved
+and not reused as version-2 tracking output.

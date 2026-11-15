@@ -7,6 +7,7 @@ class TrackingSettings(BaseModel):
     position_weight: float = Field(default=0.25, ge=0)
     iou_weight: float = Field(default=0.20, ge=0)
     class_weight: float = Field(default=0.10, ge=0)
+    scale_weight: float = Field(default=0.05, ge=0)
     max_area_ratio: float = Field(default=8, ge=1)
     fallback_iou_gate: float = Field(default=0.2, ge=0, le=1)
     fallback_displacement_gate: float = Field(default=0.25, ge=0, le=2)
@@ -22,10 +23,22 @@ class TrackingSettings(BaseModel):
     @model_validator(mode="after")
     def weights(self):
         if (
-            min(self.appearance_weight, self.position_weight, self.iou_weight, self.class_weight)
+            min(
+                self.appearance_weight,
+                self.position_weight,
+                self.iou_weight,
+                self.class_weight,
+                self.scale_weight,
+            )
             < 0
             or sum(
-                [self.appearance_weight, self.position_weight, self.iou_weight, self.class_weight]
+                [
+                    self.appearance_weight,
+                    self.position_weight,
+                    self.iou_weight,
+                    self.class_weight,
+                    self.scale_weight,
+                ]
             )
             <= 0
         ):

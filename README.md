@@ -1,41 +1,54 @@
-# SpaceGit
+<p align="center">
+  <img src="frontend/apps/web/public/mark.svg" width="64" height="64" alt="">
+</p>
 
-**Version control for physical spaces.** Capture four camera views, review
-AI-proposed changes, and build an approved image history alongside 3D viewing
-and projection tools.
+<h1 align="center">SpaceGit</h1>
 
-Built by **ZygomorphicMereOtter**, Durham University, for **DurHack 2026 —
-Marshall Wace Challenge 1: New Worlds**. We explore new ways to understand a
-familiar space: what it looked like, what changed, and which changes a person
-chooses to approve.
+<p align="center"><strong>Version control for physical spaces</strong></p>
+<p align="center">
+  DurHack 2026 · Marshall Wace Challenge 1 · New Worlds<br>
+  ZygomorphicMereOtter · Durham University
+</p>
 
-## What you can do
+<p align="center">
+  <a href="#run-the-integrated-app">Run locally</a> ·
+  <a href="docs/workflow-and-system-diagrams.md">System diagrams</a> ·
+  <a href="docs/devpost-submission.md">Project story</a> ·
+  <a href="docs/devpost-media-and-demo.md">Demo walkthrough</a>
+</p>
 
-- Create saved spaces and upload four images or import a complete live rig session.
-- Run pretrained YOLOE segmentation and DINOv2 appearance matching to propose
-  camera-local changes, keeping ambiguous matches visible for review.
-- Inspect source images, object crops and run overlays; download original mask
-  RLE JSON; record Accept, Reject or Needs review with an audit trail.
-- Explicitly select accepted proposals and commit immutable approved revisions.
-  Compare revisions and inspect an object's accepted history and source provenance.
-- Use the independent metric layout branches, 3D/model viewers and projector tools.
-- With the external WSL environment configured, generate per-view PointDiT PLYs
-  through the camera edge and inspect them in the Camera rig viewer.
+<img src="frontend/docs/screenshots/phase2/studio.png" alt="SpaceGit Hardware Studio showing a simulated gallery wall, 3D viewport, and object inspector" width="100%">
+
+*Hardware Studio preview with a simulated gallery wall and metric object poses.*
+
+## What changed in the room?
+
+Capture the same room twice. SpaceGit proposes what appeared, moved, or went
+missing from each view. Open a proposal to see the source, crop, and overlay.
+Accept the changes you can verify, then commit the ones you want to record.
+Each revision keeps the original evidence and the review decisions behind it.
+
+| Workspace | What you can explore |
+| --- | --- |
+| **Image history** | Named spaces, four-view captures, camera-local changes, and approved revisions you can compare. |
+| **Hardware Studio** | Measured layouts, object poses, branches, and layout comparisons. |
+| **Reconstruct and Project** | Inspect a model or point cloud and present a scene on a second display. The Camera rig viewer can load per-view PointDiT PLYs from a configured WSL environment. |
+
+## From capture to commit
 
 ```mermaid
 flowchart LR
-    A["Four fixed camera views"] --> B["Immutable capture"]
+    A["Four camera views"] --> B["Immutable capture"]
     B --> C["YOLOE + DINOv2"]
-    C --> D["Camera-local tracks and proposed changes"]
+    C --> D["Proposed changes"]
     D --> E["Human review"]
-    E --> F["Commit selected accepted changes"]
-    F --> G["Approved image history"]
+    E --> F["Approved revision"]
 ```
 
-`cam_01..cam_03` are side views; `cam_04` is overhead. Keep the cameras fixed
-between captures. Accepting a proposal and committing it are separate actions.
-Tracks stay scoped to a space and camera; image changes do not imply metric
-movement or automatic physical identity across views.
+Upload three side views and one overhead view, or import a complete saved rig
+session. YOLOE segments objects and DINOv2 supplies appearance features for
+matching observations from the same camera. Ambiguous matches stay in review.
+Tracks belong to a space and a camera, and changes are measured in image space.
 
 ## Run the integrated app
 
@@ -53,10 +66,7 @@ needs a separate Python 3.12 environment. The Docker API/vision worker use Pytho
 | PostgreSQL / Redis | Loopback ports 5432 / 6379 |
 | Silo objects / console | Loopback ports 9000 / 9001 |
 
-These web/API/edge ports keep this checkout separate from the older local
-SpaceGit-MVP services on 3000/3100/8000.
-
-From the repository root in PowerShell, with Docker Desktop running:
+Run these commands in PowerShell from the repository root with Docker Desktop running.
 
 ```powershell
 # First setup only: retain any existing operator configuration.
@@ -106,8 +116,8 @@ Stop existing instances on the selected ports before launching replacements.
 2. Upload three side views and one overhead view, or import a saved complete 4/4
    live camera session. Original bytes, hashes and capture metadata are retained.
 3. Click **Run inference** and inspect the run's provider, status and provenance.
-4. Review each proposal using source/crop/overlay evidence. Individual masks are
-   offered as COCO compressed RLE JSON downloads, not image previews.
+4. Review each proposal using the source image, crop, or overlay. Download
+   individual masks as COCO compressed RLE JSON.
 5. Record decisions, check **Include in revision** on accepted changes, enter a
    message and click **Commit selected changes**.
 6. Open an approved revision to compare states or inspect accepted track history.

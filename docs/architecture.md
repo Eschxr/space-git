@@ -16,8 +16,10 @@ runs/keys rather than changing prior outputs. Database job/run status is authori
 beyond Redis TTL; abrupt worker-host loss without a callback still needs operator
 reconciliation. RQ uses SpawnWorker and JSONSerializer; the parent loads no models.
 
-After extraction succeeds for all views, an environment-row lock serializes camera-local
-association. Hungarian assignment has explicit unmatched options, configurable scoring
+Scheduling freezes the four-view baseline under the environment-row lock and includes
+its reference in the processing config hash. After extraction succeeds for all views,
+an environment-row lock serializes association against that frozen state.
+Hungarian assignment has explicit unmatched options, configurable scoring
 and ambiguity margins. Immutable run snapshots carry chosen references and decisions;
 mutable track registry fields are advisory. No automatic cross-camera physical-object
 links exist. Missing observations retain last-visible evidence for possible reappearance.
@@ -55,3 +57,17 @@ and synthetic point-grid tests only. No frontend/OpenUSD is included.
 
 Original Phase 0–4 architecture remains in Git and implementation-status history;
 [the refactor plan](../CODEX_YOLOE_REFACTOR_PLAN.md) supersedes its vision/tracking path.
+
+Image-history APIs expose capture attempts, review progress, approved revision evidence,
+accepted per-track changes and endpoint comparisons. Review decisions append immutable
+records while retaining current proposal status. Commits copy the final review decision
+and source run/model/config/frame/artifact provenance in the same transaction as
+approved snapshots. Older revisions derive explicitly tagged provenance on read.
+Evidence readers sign URLs and retain unavailable asset references with explicit reasons.
+
+The independently developed `frontend/` has a web app and its own local edge API.
+Scene Tracker's typed capture/workflow/revision contracts provide the integration
+boundary. The edge's metric scenes and branched commits have their own domain model.
+Source capture/frame/camera IDs and canonical dimensions in revision evidence align
+with highlight manifests for a future per-camera cloud viewer. PointDiT artifact
+generation and pixel-to-point mapping remain the separate Phase 9 implementation.

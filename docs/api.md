@@ -212,3 +212,118 @@ chosen assignments and unmatched decisions. Accepted baselines use reference kin
 single `reference_run_id` is not claimed for those comparisons. Historical v1 artifacts
 remain readable. The processing version changed so old successful results are preserved
 and not reused as version-2 tracking output.
+
+## Capture workflow and processing attempts
+
+All paths below use the existing loopback API and the `/api/v1` prefix.
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/captures/{id}/processing-runs` | Newest-first attempts, provider, job/attempt, timestamps, config hash, model provenance, frozen reference, review counts and committed revision IDs |
+| GET | `/captures/{id}/workflow` | Four source images with signed evidence, latest attempt, observed tracks, approved head and an actionable outcome |
+| GET | `/change-proposals/{id}/decisions` | Append-only review decisions and current proposal status/reason |
+| GET | `/revisions/{id}/evidence` | Versioned provenance, four source images, all approved tracks and signed image/mask/crop/overlay evidence |
+| GET | `/revisions/{id}/compare?from_revision_id=UUID` | Approved endpoint state comparison |
+| GET | `/view-tracks/{id}/revisions` | Accepted revision changes for one camera-local identity |
+
+Attempt, decision and accepted-track lists support `limit=1..100` and `offset>=0`.
+Workflow outcomes include `unprocessed`, `processing`, `failed`, `pending_review`,
+`ready_to_commit`, `review_complete`, `committed`, `no_changes`, `inspection_only`
+and `stale_baseline`. Zero proposals need no commit. All-rejected proposals leave
+the approved state at its current head. Commits require at least one accepted proposal.
+After a partial commit, reprocess to review remaining proposals against the new head.
+
+### Reference policy
+
+Scheduling holds the environment lock and records a single reference for all four
+views in the config hash. It prefers the latest eligible approved revision, whose
+tracks may retain observations from multiple source captures. Without an approved
+baseline it uses the latest eligible succeeded tracked run from another capture.
+Future captures and unsuccessful runs are excluded. Ties use run IDs after capture
+and completion times. A new baseline creates a new processing configuration.
+
+A queued run keeps its recorded reference even when the head advances before the
+worker starts. Its later commit fails with `stale_baseline` if the approved parent
+has advanced. Reprocessing creates proposals against the new head.
+
+Reprocessing a capture already at the approved head compares against that head and
+is marked `approved_capture_rerun` for inspection. Backdated captures compare against
+eligible older evidence and are marked `backdated_capture` when the current head is
+newer. Explicit `reference_capture_id` requests require a succeeded tracked earlier
+capture and are marked `explicit_reference`. These inspection runs return 409
+`inspection_only` on commit and remain discoverable with earlier attempts.
+
+### Review decisions
+
+The decision POST accepts the existing `status` and `reason`, plus optional
+`reviewer` (default `local-operator`) and `idempotency_key`. The reviewer is an
+operator-supplied label in this local application. Each decision retains previous/new
+status, previous/new reason, label and UTC time. An identical keyed retry returns the
+recorded decision and current proposal status. Reusing its key with different content
+returns 409. Retrying an earlier key after a newer review leaves the newer status in
+place. Without a key, an exact repeat of the latest decision reuses that record.
+Concurrent decisions serialize on the proposal.
+
+Accepting `uncertain` approves the proposal's camera-local run snapshot, including
+its uncertainty flag, assigned track IDs and candidate evidence. Accepting a missing
+event applies an unobserved state with last-visible evidence. Repeated accepted missing
+events advance its missing counter. Reappearance applies the newly observed state and
+resets that counter. Rejection or needs-review leaves approved state at its previous
+snapshot. Committing copies the selected event and final review record. Committed
+events and decision history reject database modification.
+
+### Revision evidence and comparisons
+
+`GET /revisions/{id}` preserves raw approved `tracks` and adds a stable
+`evidence_path`. The linked response separates `source_images` from
+`approved_tracks`. Source images belong to the revision capture. An approved track
+can reference an older capture when a newer observation was rejected. Each observation
+supplies its capture/frame/run/camera, canonical dimensions, box, image, mask, crop and
+annotated overlays. Render each observation against its referenced image. Overlays
+describe the associated processing run.
+
+New commits snapshot source frames, run manifests, model/config provenance and immutable
+artifact keys/hashes inside the revision transaction. Legacy revisions return
+`origin=derived_legacy` provenance assembled from retained events and runs. Signed
+URLs are generated on read. Unavailable blobs retain their key/hash and an explicit
+unavailable reason, allowing the remaining evidence to be inspected.
+
+The existing `/diff` route returns committed events along an ancestor chain.
+`/compare` compares endpoint track content in deterministic camera/track order,
+with `added`, `removed`, `missing`, `restored`, `changed` or `unchanged`
+entries and before/after evidence. Compared fields are lifecycle status, raw label,
+normalized box rounded to six decimals, mask content hash, embedding hash and
+uncertainty. Capture/run IDs, missing counters and timestamps do not affect net content.
+Movement out and back can have an unchanged endpoint alongside both move events.
+
+Identical comparisons return unchanged entries. Reverse comparisons swap evidence and
+report `direction=reverse`. A track absent from the earlier endpoint is added, and
+the reversed comparison reports removed from that endpoint state. Unrelated or
+cross-environment revisions return 422. Unknown IDs return 404. Accepted track history
+lists revisions that committed an event for that track, with prior/approved snapshots
+and reviewed events.
+
+### HTTP walkthrough
+
+After upload and processing, discover the latest state and review operator-selected
+proposals. Commit the selected accepted IDs with the revision POST documented above.
+
+```bash
+curl http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/processing-runs
+curl http://127.0.0.1:8000/api/v1/captures/CAPTURE_ID/workflow
+curl -X POST http://127.0.0.1:8000/api/v1/change-proposals/PROPOSAL_ID/decision \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"accepted","reviewer":"operator","reason":"Reviewed evidence","idempotency_key":"review-001"}'
+curl http://127.0.0.1:8000/api/v1/change-proposals/PROPOSAL_ID/decisions
+curl http://127.0.0.1:8000/api/v1/revisions/REVISION_ID/evidence
+curl 'http://127.0.0.1:8000/api/v1/revisions/REVISION_ID/compare?from_revision_id=EARLIER_REVISION_ID'
+curl http://127.0.0.1:8000/api/v1/view-tracks/TRACK_ID/revisions
+```
+
+The frontend can consume these versioned contracts through a Scene Tracker adapter.
+Its existing edge `/commits`, metric wall scenes and branch/merge operations have
+different contracts. Revision evidence links per-source-capture/camera highlight
+manifests. A future PointDiT viewer must use the matching capture/frame/camera and
+recorded pixel-to-point transform for each cloud. The current projection UI can
+independently open local PLY assets. Phase 9 supplies reconstruction jobs and cloud
+artifact transport.

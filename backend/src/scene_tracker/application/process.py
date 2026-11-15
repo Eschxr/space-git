@@ -1,6 +1,3 @@
-import hashlib
-import json
-
 from scene_tracker.core.errors import AppError
 
 
@@ -37,7 +34,7 @@ class ProcessingService:
                 "pipeline_version": "yoloe-fake-v1",
             }
         config["tracking"] = self.settings.tracking.model_dump()
-        config["pipeline_version"] += "-tracks-v2-changes-v1"
+        config["pipeline_version"] += "-tracks-v2-changes-v1-reference-v1"
         if reference_capture_id is not None:
             current = self.repository.capture(capture_id)
             baseline = self.repository.capture(reference_capture_id)
@@ -52,8 +49,7 @@ class ProcessingService:
                     422,
                 )
             config["reference_capture_id"] = str(reference_capture_id)
-        digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
-        job = self.repository.prepare_job(capture_id, config, digest, retry)
+        job = self.repository.prepare_job(capture_id, config, retry)
         if job["status"] == "queued":
             try:
                 self.dispatcher.enqueue_vision(str(job["id"]), str(job["run_id"]), job["attempt"])

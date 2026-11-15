@@ -13,7 +13,12 @@ Phase 4. Historical phase records remain in [implementation-status.md](implement
 | R5 — Highlight manifests/mock colorizer | Completed: temporal manifests and exact dense-grid mock PLY gates pass |
 | R6 — Cleanup/docs/full fake E2E | Completed: 82 offline, 18 service and 1 reconstruction tests pass; lint/format pass |
 | Phase 5 — Camera-local tracking consolidation | Completed: 87 offline and 19 service tests pass; [assessment](phase5-assessment.md) |
+| Phase 6 — Capture/run workflow and references | Completed: discoverable attempts/evidence, frozen queued references and inspection policies |
+| Phase 7 — Auditable review | Completed: immutable decision trail, idempotent retries and explicit uncertainty/lifecycle semantics |
+| Phase 8 — Complete image history | Completed: provenance/evidence APIs, accepted track history and endpoint comparisons; 90 offline and 26 Linux service tests pass |
 | Future P9 — Real PointDiT/highlighted PLY | Deferred; outside this completed refactor |
+
+## Historical R0–R6 and Phase 5 execution record
 
 R0–R6 are complete. The user explicitly authorized all remaining checkpoints in one
 run; sequential gates and checkpoint commits were retained. That request stopped
@@ -36,8 +41,9 @@ Current behavior/constraints: [API](api.md), [matching](matching-and-diffs.md),
 [highlights](highlights.md), [legacy note](legacy-vision-pipeline.md).
 
 
-The completed refactor gates do not mean the full original Phase 8 product scope is
-finished. [The Phase 8 gap assessment](phase8-gap-assessment.md) identifies remaining
-workflow/reference, review audit, revision evidence, accepted per-track history and
-state-comparison work. The active plan now retains explicit Phase 6–8 completion gates.
-This is a planning correction; no additional application phase has been implemented.
+The subsequent Phase 6–8 implementation completes the workflow/reference, review audit,
+revision evidence, accepted track history and state comparison gaps identified in
+[the assessment](phase8-gap-assessment.md). The older checkpoint and real-model
+validation statements above describe their original refactor/Phase 5 run. Current
+history implementation gates and local runtime effects are recorded in
+[implementation-status](implementation-status.md). Phase 9 remains deferred.

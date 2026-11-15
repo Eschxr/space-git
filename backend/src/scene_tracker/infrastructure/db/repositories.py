@@ -1,10 +1,13 @@
-"""Transactional domain persistence; PostgreSQL serializes scheduling per capture."""
+"""Transactional persistence with environment-serialized processing references."""
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import DateTime, cast, func, insert, select, update
 
+from scene_tracker.application.references import select_reference
 from scene_tracker.core.errors import AppError
 from scene_tracker.infrastructure.db.models import (
     artifacts,
@@ -118,17 +121,24 @@ class Repository:
                 ).mappings()
             ]
 
-    def prepare_job(self, capture_id, config, config_hash, retry):
+    def prepare_job(self, capture_id, config, retry):
         with self.engine.begin() as conn:
             capture = (
-                conn.execute(select(captures).where(captures.c.id == capture_id).with_for_update())
-                .mappings()
-                .first()
+                conn.execute(select(captures).where(captures.c.id == capture_id)).mappings().first()
             )
             if capture is None:
                 raise AppError("not_found", "Capture not found", 404)
             if capture.status != "ready":
                 raise AppError("invalid_capture", "Capture is not ready", 409)
+            conn.execute(
+                select(environments.c.id)
+                .where(environments.c.id == capture.environment_id)
+                .with_for_update()
+            )
+            config = config | {
+                "reference": select_reference(conn, capture, config.get("reference_capture_id")),
+            }
+            config_hash = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
             existing = (
                 conn.execute(
                     select(jobs).where(
@@ -159,6 +169,7 @@ class Repository:
                         else "synthetic_fixture_pipeline",
                         "job_id": str(job_id),
                         "attempt": attempt,
+                        "scheduled_at": datetime.now(UTC).isoformat(),
                         "inference_performed": False,
                     },
                     progress={"stage": "queued"},
@@ -187,6 +198,26 @@ class Repository:
                     )
                 )
             return dict(conn.execute(select(jobs).where(jobs.c.id == job_id)).mappings().one())
+
+    def list_runs(self, capture_id, limit, offset):
+        self.capture(capture_id)
+        timestamp = func.coalesce(
+            cast(processing_runs.c.model_manifest["scheduled_at"].astext, DateTime(timezone=True)),
+            processing_runs.c.started_at,
+            processing_runs.c.completed_at,
+        )
+        with self.engine.connect() as conn:
+            return (
+                conn.execute(
+                    select(processing_runs)
+                    .where(processing_runs.c.capture_id == capture_id)
+                    .order_by(timestamp.desc().nullslast(), processing_runs.c.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                .mappings()
+                .all()
+            )
 
     def run(self, run_id):
         with self.engine.connect() as conn:

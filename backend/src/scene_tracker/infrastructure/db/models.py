@@ -292,6 +292,7 @@ change_proposals = model(
 revisions = model(
     "revisions",
     scope(),
+    c("provenance", JSONB, nullable=True),
     c("idempotency_key", String, nullable=True),
     c("request_hash", String, nullable=True),
     c("parent_id", Uuid, nullable=True),
@@ -320,6 +321,28 @@ revision_changes = model(
         fk("revision_id", "revisions"),
         fk("proposal_id", "change_proposals"),
         UniqueConstraint("proposal_id"),
+    ),
+)
+
+review_decisions = model(
+    "review_decisions",
+    scope(),
+    c("proposal_id"),
+    c("previous_status", String),
+    c("new_status", String),
+    c("previous_reason", Text, nullable=True),
+    c("reason", Text, nullable=True),
+    c("reviewer", String(200)),
+    c("decided_at", DateTime(timezone=True)),
+    c("idempotency_key", String(200), nullable=True),
+    c("request_hash", String(64)),
+    constraints=(
+        unique_scope(),
+        fk("environment_id", "environments", scoped=False),
+        fk("proposal_id", "change_proposals"),
+        values("previous_status", REVIEWS),
+        values("new_status", ["accepted", "rejected", "needs_review"]),
+        UniqueConstraint("proposal_id", "idempotency_key"),
     ),
 )
 

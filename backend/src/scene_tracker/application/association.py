@@ -3,20 +3,17 @@
 from uuid import UUID, uuid5
 
 import numpy as np
-from sqlalchemy import case, insert, select, update
+from sqlalchemy import insert, select, update
 
+from scene_tracker.application.references import select_reference
 from scene_tracker.core.errors import AppError
 from scene_tracker.core.tracking_settings import TrackingSettings
 from scene_tracker.domain.contracts import Mask
 from scene_tracker.infrastructure.db.models import (
-    artifacts,
-    captures,
     detections,
     environments,
     frames,
-    processing_runs,
     revision_track_snapshots,
-    revisions,
     track_observations,
     view_track_snapshots,
     view_tracks,
@@ -113,37 +110,9 @@ def updated_prototype(before, observation, candidate, settings):
     return previous_prototype(before)
 
 
-def reference(conn, run, capture, camera, explicit):
-    query = (
-        select(processing_runs.c.id)
-        .join(captures, captures.c.id == processing_runs.c.capture_id)
-        .outerjoin(revisions, revisions.c.capture_id == captures.c.id)
-        .where(
-            captures.c.environment_id == capture["environment_id"],
-            captures.c.id != capture["id"],
-            captures.c.captured_at <= capture["captured_at"],
-            processing_runs.c.status == "succeeded",
-            select(artifacts.c.id)
-            .where(artifacts.c.source_id == processing_runs.c.id, artifacts.c.kind == "tracking")
-            .exists(),
-        )
-    )
-    if explicit:
-        query = query.where(captures.c.id == UUID(explicit))
-    return conn.execute(
-        query.order_by(
-            case((revisions.c.id.is_not(None), 0), else_=1),
-            revisions.c.created_at.desc().nullslast(),
-            captures.c.captured_at.desc(),
-            processing_runs.c.completed_at.desc(),
-            processing_runs.c.id,
-        ).limit(1)
-    ).scalar()
-
-
 def associate(repository, run, capture, store):
     settings = TrackingSettings.model_validate(run["model_manifest"]["config"].get("tracking", {}))
-    explicit = run["model_manifest"]["config"].get("reference_capture_id")
+    config = run["model_manifest"]["config"]
     reports, states = {}, []
     with repository.engine.begin() as conn:
         conn.execute(
@@ -155,54 +124,23 @@ def associate(repository, run, capture, store):
             select(view_track_snapshots.c.id).where(view_track_snapshots.c.run_id == run["id"])
         ).first():
             raise AppError("already_tracked", "Run tracking snapshots already exist", 409)
+        baseline = config.get("reference") or select_reference(
+            conn, capture, config.get("reference_capture_id")
+        )
+        reference_run = baseline["run_id"]
+        reference_revision = baseline["revision_id"]
+        previous_states = []
+        if reference_revision or reference_run:
+            table, source_id = (
+                (revision_track_snapshots, revision_track_snapshots.c.revision_id)
+                if reference_revision
+                else (view_track_snapshots, view_track_snapshots.c.run_id)
+            )
+            previous_states = conn.scalars(
+                select(table.c.state).where(source_id == UUID(reference_revision or reference_run))
+            ).all()
         for camera in ("cam_01", "cam_02", "cam_03", "cam_04"):
-            ref = reference(conn, run, capture, camera, explicit)
-            accepted = (
-                None
-                if explicit
-                else conn.execute(
-                    select(revisions)
-                    .join(captures, captures.c.id == revisions.c.capture_id)
-                    .where(
-                        revisions.c.environment_id == capture["environment_id"],
-                        captures.c.id != capture["id"],
-                        captures.c.captured_at <= capture["captured_at"],
-                    )
-                    .order_by(revisions.c.created_at.desc(), revisions.c.id)
-                    .limit(1)
-                )
-                .mappings()
-                .first()
-            )
-            previous = (
-                []
-                if ref is None
-                else [
-                    dict(r.state)
-                    for r in conn.execute(
-                        select(view_track_snapshots).where(
-                            view_track_snapshots.c.run_id == ref,
-                            view_track_snapshots.c.camera_id == camera,
-                        )
-                    ).mappings()
-                ]
-            )
-            if accepted:
-                previous = [
-                    dict(r.state)
-                    for r in conn.execute(
-                        select(revision_track_snapshots).where(
-                            revision_track_snapshots.c.revision_id == accepted["id"],
-                            revision_track_snapshots.c.camera_id == camera,
-                        )
-                    ).mappings()
-                ]
-            if explicit and ref is None:
-                raise AppError(
-                    "invalid_reference",
-                    "Reference has no eligible same-camera processed state",
-                    422,
-                )
+            previous = [state for state in previous_states if state["camera_id"] == camera]
             current = [
                 observation(dict(row), capture["id"])
                 for row in conn.execute(
@@ -214,28 +152,12 @@ def associate(repository, run, capture, store):
             old_inputs = [track_features(s, store) for s in previous]
             new_inputs = [features(o, store) for o in current]
             report = match(camera, old_inputs, new_inputs, settings)
-            # Approved state can combine observations from several runs/captures.
-            reference_run = str(ref) if ref and accepted is None else None
             report.update(
                 camera_id=camera,
                 reference_run_id=reference_run,
-                reference_kind="accepted_revision"
-                if accepted
-                else "processed_run"
-                if ref
-                else "initial",
-                reference_capture_id=str(accepted["capture_id"])
-                if accepted
-                else (
-                    str(
-                        conn.scalar(
-                            select(processing_runs.c.capture_id).where(processing_runs.c.id == ref)
-                        )
-                    )
-                    if ref
-                    else None
-                ),
-                reference_revision_id=str(accepted["id"]) if accepted else None,
+                reference_kind=baseline["kind"],
+                reference_capture_id=baseline["capture_id"],
+                reference_revision_id=reference_revision,
                 run_id=str(run["id"]),
             )
             reports[camera] = report
@@ -249,7 +171,9 @@ def associate(repository, run, capture, store):
                     if candidate
                     else uuid5(run["id"], f"{camera}:{obs['id']}")
                 )
-                uncertain = obs["id"] in report["uncertain_detections"]
+                uncertain = obs["id"] in report["uncertain_detections"] or bool(
+                    candidate and candidate["embedding_missing"]
+                )
                 before = old_map.get(str(track_id))
                 state = {
                     "schema_version": 2,
@@ -266,7 +190,7 @@ def associate(repository, run, capture, store):
                     "uncertain": uncertain,
                     "match": candidate,
                     "reference_run_id": reference_run,
-                    "reference_revision_id": str(accepted["id"]) if accepted else None,
+                    "reference_revision_id": reference_revision,
                 }
                 if not candidate:
                     conn.execute(
@@ -314,7 +238,7 @@ def associate(repository, run, capture, store):
                             "uncertain": before["view_track_id"] in report["uncertain_tracks"],
                             "match": None,
                             "reference_run_id": reference_run,
-                            "reference_revision_id": str(accepted["id"]) if accepted else None,
+                            "reference_revision_id": reference_revision,
                         }
                     )
         for state in states:
@@ -342,4 +266,10 @@ def associate(repository, run, capture, store):
                     ),
                 )
             )
-    return {"schema_version": 2, "run_id": str(run["id"]), "cameras": reports, "states": states}
+    return {
+        "schema_version": 2,
+        "run_id": str(run["id"]),
+        "reference": baseline,
+        "cameras": reports,
+        "states": states,
+    }

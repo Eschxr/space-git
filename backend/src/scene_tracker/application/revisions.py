@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import insert, select, update
 
+from scene_tracker.application.history import provenance
+from scene_tracker.application.references import latest
 from scene_tracker.core.errors import AppError
 from scene_tracker.infrastructure.db.models import (
     change_proposals as proposals,
@@ -14,6 +16,7 @@ from scene_tracker.infrastructure.db.models import (
 from scene_tracker.infrastructure.db.models import (
     environments,
     processing_runs,
+    review_decisions,
     revision_changes,
     revision_track_snapshots,
     revisions,
@@ -27,30 +30,52 @@ def require(row, message="Resource not found"):
     return dict(row)
 
 
-def latest(conn, environment_id):
-    return (
-        conn.execute(
-            select(revisions)
-            .where(revisions.c.environment_id == environment_id)
-            .order_by(revisions.c.created_at.desc(), revisions.c.id)
-            .limit(1)
-        )
-        .mappings()
-        .first()
-    )
-
-
-def decide(repository, proposal_id, status, reason):
+def decide(
+    repository, proposal_id, status, reason, reviewer="local-operator", idempotency_key=None
+):
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"status": status, "reason": reason, "reviewer": reviewer},
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
     with repository.engine.begin() as conn:
         row = require(
             conn.execute(select(proposals).where(proposals.c.id == proposal_id).with_for_update())
             .mappings()
             .first()
         )
+        previous = (
+            conn.execute(
+                select(review_decisions)
+                .where(review_decisions.c.proposal_id == proposal_id)
+                .order_by(review_decisions.c.decided_at.desc(), review_decisions.c.id)
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
+        if idempotency_key:
+            prior = (
+                conn.execute(
+                    select(review_decisions).where(
+                        review_decisions.c.proposal_id == proposal_id,
+                        review_decisions.c.idempotency_key == idempotency_key,
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if prior:
+                if prior["request_hash"] != request_hash:
+                    raise AppError("idempotency_conflict", "Decision key content differs", 409)
+                return row | {"decision": dict(prior)}
+        elif previous and previous["request_hash"] == request_hash:
+            return row | {"decision": dict(previous)}
         if conn.execute(
             select(revision_changes.c.id).where(revision_changes.c.proposal_id == proposal_id)
         ).first():
-            if row["status"] == status:
+            if row["status"] == status and row["reason"] == reason:
                 return row
             raise AppError("already_committed", "Committed proposals are immutable", 409)
         run = require(
@@ -60,12 +85,26 @@ def decide(repository, proposal_id, status, reason):
         )
         if run["status"] != "succeeded":
             raise AppError("run_not_ready", "Only succeeded runs can be reviewed", 409)
+        decision = {
+            "id": uuid4(),
+            "environment_id": row["environment_id"],
+            "proposal_id": proposal_id,
+            "previous_status": row["status"],
+            "new_status": status,
+            "previous_reason": row["reason"],
+            "reason": reason,
+            "reviewer": reviewer,
+            "decided_at": datetime.now(UTC),
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+        }
+        conn.execute(insert(review_decisions).values(**decision))
         conn.execute(
             update(proposals)
             .where(proposals.c.id == proposal_id)
             .values(status=status, reason=reason)
         )
-        return row | {"status": status, "reason": reason}
+        return row | {"status": status, "reason": reason, "decision": decision}
 
 
 def commit(repository, environment_id, body):
@@ -131,6 +170,11 @@ def commit(repository, environment_id, body):
             raise AppError(
                 "invalid_changes", "Run must succeed and belong to the revision capture", 422
             )
+        config = run["model_manifest"].get("config", {})
+        if config.get("reference_capture_id") or config.get("reference", {}).get(
+            "inspection_reason"
+        ):
+            raise AppError("inspection_only", "This run is for inspection only", 409)
         if conn.execute(
             select(revision_changes.c.id).where(revision_changes.c.proposal_id.in_(ids))
         ).first():
@@ -166,6 +210,7 @@ def commit(repository, environment_id, body):
             "message": body.message,
             "idempotency_key": body.idempotency_key,
             "request_hash": digest,
+            "provenance": provenance(conn, capture_id, [run["id"]]),
         }
         conn.execute(insert(revisions).values(**values))
         for proposal in selected:
@@ -175,6 +220,18 @@ def commit(repository, environment_id, body):
             state[track] = snapshots[track]
             # Copy all evidence: later review cannot change a committed event.
             payload = {k: str(v) if isinstance(v, UUID) else v for k, v in proposal.items()}
+            decision = (
+                conn.execute(
+                    select(review_decisions)
+                    .where(review_decisions.c.proposal_id == proposal["id"])
+                    .order_by(review_decisions.c.decided_at.desc(), review_decisions.c.id)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            if decision:
+                payload["review_decision"] = json.loads(json.dumps(dict(decision), default=str))
             conn.execute(
                 insert(revision_changes).values(
                     environment_id=environment_id,

@@ -33,7 +33,7 @@ root=Path(os.getenv("SPACEGIT_DATA",ROOT/"data"))
 print(json.dumps(dict(cameras=devices.cameras(),displays=devices.displays(),
     ffmpeg=bool(shutil.which("ffmpeg")),colmap=bool(shutil.which(os.getenv("SPACEGIT_COLMAP","colmap"))),
     gpu=gpu(),ports={p:"listening" if listening(p) else "no listener" for p in (3000,8000)},
-    database={"sqlite":sqlite3.sqlite_version,"live":(root/"live.sqlite3").is_file(),"demo":(root/"demo.sqlite3").is_file()},
+    database={"sqlite":sqlite3.sqlite_version,"live":(root/"live.sqlite3").is_file()},
     storage={"exists":root.is_dir(),"free_gib":round(shutil.disk_usage(root if root.exists() else ROOT).free/(1024**3),1),
     "phone_https_configured":bool(os.getenv("SPACEGIT_MOBILE_ORIGIN"))},
     key_configured=bool(os.getenv("SPACEGIT_TOKEN"))),indent=2))

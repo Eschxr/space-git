@@ -68,7 +68,14 @@ export async function api<T>(token:string,path:string,body?:unknown,method?:stri
  if(!localHost()) throw Error('Local edge controls are available on the projector workstation.');
  const r=await fetch(apiBase()+'/api/v1'+path,{headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(timeoutMs),cache:'no-store'});
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(typeof data.detail==='string'?data.detail:'Request failed ('+r.status+'). Check the supplied values.');}
- return r.json() as Promise<T>;
+ const data=await r.json();
+ if(path==='/status'&&data.live?.mode!=='live')throw Error('Start the edge in live mode to use real data.');
+ if(path==='/commits'&&Array.isArray(data.commits)){
+  data.commits=data.commits.filter((item:{evidence?:{mode?:string}})=>item.evidence?.mode!=='demo');
+  const ids=new Set(data.commits.map((item:{id:string})=>item.id));
+  data.branches=Object.fromEntries(Object.entries(data.branches??{}).filter(([,id])=>ids.has(id)));
+ }
+ return data as T;
 }
 export type Wizard={index:number;point:Pair;key?:string;shown?:boolean;kind?:'physical'|'auto_blank'|'auto_spot';expected?:Pair};
 export function useLive(token:string,maxSilence=1000){
@@ -82,6 +89,7 @@ export function useLive(token:string,maxSilence=1000){
    ws=new WebSocket(endpoint,'spacegit.v1');
    ws.onopen=()=>ws.send(token);
    ws.onmessage=e=>{try{const n:Live=JSON.parse(e.data);if(!n||n.version!==1)return;
+    if(n.mode!=='live'){set(null);err('Start the edge in live mode to use real data.');return;}
     if(n.device!==device){device=n.device;last=0;}
     if(n.seq<=last)return;last=n.seq;received=Date.now();set(n);err('');
    }catch{}};

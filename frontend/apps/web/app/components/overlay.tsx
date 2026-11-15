@@ -25,7 +25,6 @@ export function OverlayView({event,wizard,output=[1600,900]}:{event:Live|null;wi
    <path d={'M'+[w*.28,h*.92]+'h'+w*.44*o.progress} stroke="currentColor" strokeWidth={6*s}/>
   </>}
   <text x={w*.04} y={h*.095} fontSize={37*s} fill="currentColor">{event?.plan?.done&&state==='VERIFIED'?'Revision deployed':statusLabel[state]}{o?.distance_m!==undefined&&state==='MOVING'?' · '+(o.distance_m*100).toFixed(1)+' cm':''}</text>
-  {event?.mode==='demo'&&<text x={w*.04} y={h*.15} fill="#FFD38D" fontSize={28*s}>DEMO / SIMULATED</text>}
   </>}
  </svg>;
 }

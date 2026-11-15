@@ -74,6 +74,7 @@ test('invalid model plan preserves the scene and prompt, quick adds work offline
 
 test('projector renders once and the page mirrors live pixels, scene edits, blackout and source changes',async({page},info)=>{
   await page.goto('/project');
+  await page.getByLabel('Open reconstructed scene').setInputFiles({name:'source.ply',mimeType:'application/octet-stream',buffer:Buffer.from(ply)});
   await page.getByRole('button',{name:'+ sphere',exact:true}).click();
   const [output]=await Promise.all([page.waitForEvent('popup'),page.getByRole('button',{name:'Open projector window',exact:true}).click()]);
   const surface=page.getByTestId('projector-surface');

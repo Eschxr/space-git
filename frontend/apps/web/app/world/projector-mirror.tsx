@@ -2,8 +2,8 @@
 
 import {useEffect,useRef,useState} from 'react';
 
-/** Mirror the one renderer: do not tick a second simulation or change its camera. */
-export function ProjectorMirror({root,office}:{root:HTMLDivElement;office:boolean}){
+/** Mirror the one renderer: keep the preview and output on the same camera. */
+export function ProjectorMirror({root}:{root:HTMLDivElement}){
   const video=useRef<HTMLVideoElement>(null);
   const [issue,setIssue]=useState('Connecting live preview…');
   useEffect(()=>{
@@ -25,9 +25,8 @@ export function ProjectorMirror({root,office}:{root:HTMLDivElement;office:boolea
     observer.observe(root,{childList:true,subtree:true});update();
     return ()=>{observer.disconnect();stop();if(element)element.srcObject=null;};
   },[root]);
-  return <div className={office?'nw-portal':'nw-mirror'}>
+  return <div className="nw-mirror">
     <video ref={video} autoPlay muted playsInline aria-label="Live projector preview" onClick={()=>{void video.current?.play().then(()=>setIssue(''));}}/>
-    {office&&<div className="nw-portal-frame" aria-hidden="true"/>}
     {issue&&<div className="nw-render-note" role="status">{issue}</div>}
   </div>;
 }

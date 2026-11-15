@@ -1,5 +1,11 @@
 # Verification and acceptance
 
+This document retains historical evidence. The current frontend has removed its
+bundled scenes, rehearsals and simulated workspace. Historical fixture browser
+checks below do not describe available product flows or certify real hardware.
+Current real-data-only checks are recorded in `docs/implementation-status.md` at
+the repository root. Offline contracts remain isolated from operator sessions.
+
 ## Markerless MVP
 
 | Acceptance | Status | Evidence |

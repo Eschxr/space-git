@@ -70,11 +70,10 @@ export function useProjectorWindow() {
   return {output, error, open, close};
 }
 
-export function ProjectorOutput({output, children, close, replay}:{
+export function ProjectorOutput({output, children, close}:{
   output: ProjectorWindow;
   children: ReactNode;
   close: () => void;
-  replay: () => void;
 }) {
   const display = useRef<HTMLElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -91,7 +90,6 @@ export function ProjectorOutput({output, children, close, replay}:{
     if (!display.current) return;
     try {
       await requestDisplayFullscreen(display.current);
-      replay();
       setError('');
     } catch {
       setError('Fullscreen was blocked. Open SpaceGit in Chrome or Edge, or use the browser’s fullscreen shortcut.');

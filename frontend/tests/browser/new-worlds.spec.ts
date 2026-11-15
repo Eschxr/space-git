@@ -50,61 +50,51 @@ test('Capture connects, saves the camera sequence and refreshes the floor previe
  await expect(first.getByRole('img',{name:'Camera 4 preview'})).toBeVisible();
 });
 
-test('one-click demo records, versions, reconstructs and projects without the edge',async({page},info)=>{
- const errors:string[]=[];
- page.on('pageerror',e=>errors.push(e.message));
- await page.route(edgeURL+'/**',route=>route.abort());
+test('real workspace has no synthetic capture, saved fixture history or guided demo entry point',async({page})=>{
+ const stored=JSON.stringify({captures:[{id:'fixture',mode:'demo'}],history:{commits:[{id:'fixture',message:'Fabricated history'}],branches:{main:'fixture'}}});
+ await page.addInitScript(value=>localStorage.setItem('spacegit.newworlds.workspace.v1',value),stored);
+ await page.goto('/world?demo=1');
+ await expect(page.getByRole('button',{name:'Start Demo'})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Capture session',exact:true})).toBeDisabled();
+ await expect(page.getByText('No sessions yet.',{exact:false})).toBeVisible();
+ await expect(page.locator('.nw-feed-art')).toHaveCount(0);
+ await page.keyboard.press('d');
+ await expect(page.getByRole('region',{name:'Guided demo'})).toHaveCount(0);
+ await page.getByRole('button',{name:'Version control',exact:false}).click();
+ await expect(page.getByText('No revisions yet.',{exact:false})).toBeVisible();
+ expect(await page.evaluate(()=>localStorage.getItem('spacegit.newworlds.workspace.v1'))).toBe(stored);
+ await page.goto('/studio/3d');
+ await expect(page.getByRole('heading',{name:'No recorded scene'})).toBeVisible();
+ await expect(page.locator('canvas')).toHaveCount(0);
  await page.goto('/');
- await page.getByRole('link',{name:'Start Demo',exact:true}).click();
- const guide=page.getByRole('region',{name:'Guided demo'});
- await expect(guide.getByText('Inspect the four feeds')).toBeVisible();
- await guide.getByRole('button',{name:'Pause demo'}).click();
- await expect(page.locator('.nw-feed')).toHaveCount(4);
- const advance=async (stage:string)=>{
-  await guide.getByRole('button',{name:'Next stage'}).click();
-  if(stage!=='Activate projector view'&&stage!=='Watch the office come alive') await expect(guide.getByText(stage,{exact:true})).toBeVisible();
- };
- await page.screenshot({path:info.outputPath('capture.png'),animations:'disabled'});
- await advance('Capture the initial state');
- await expect(page.getByText('SESSION',{exact:false}).first()).toBeVisible();
- await advance('Commit the initial state');
- await expect(page.getByRole('button',{name:/Baseline desk layout/})).toBeVisible();
- await advance('Capture and commit a changed scene');
- await advance('Compare the revisions');
- await expect(page.getByText(/Ceramic mug moved 1.10 m right/)).toBeVisible();
- await expect(page.getByText(/3 objects are unchanged/)).toBeVisible();
- await page.screenshot({path:info.outputPath('versions.png'),animations:'disabled'});
- await advance('Reconstruct the study');
- const scene=page.getByTestId('reconstruction');
- await expect(scene.locator('canvas')).toBeVisible();
- await page.getByRole('button',{name:'Ceramic mug'}).click();
- await expect(page.getByText('mug',{exact:true})).toBeVisible();
- await advance('Open the virtual office');
- await expect(page.getByTestId('projector-surface').locator('canvas')).toBeVisible();
-
- await advance('Activate projector view');
- await expect.poll(()=>page.evaluate(()=>document.fullscreenElement?.getAttribute('data-testid'))).toBe('projector-surface');
- await expect(page.getByTestId('projector-surface')).toHaveClass(/is-presenting/);
- await page.evaluate(()=>document.exitFullscreen());
- await advance('Watch the office come alive');
- await expect(page.getByText('RUNNING',{exact:true})).toBeVisible();
- await expect(page.getByText(/At work|On the move|Inspecting details/).first()).toBeVisible();
- const canvas=page.getByTestId('projector-surface').locator('canvas');
- const first=await canvas.screenshot({path:info.outputPath('office.png')});
- await expect.poll(async()=>!(await canvas.screenshot()).equals(first)).toBe(true);
- expect(errors).toEqual([]);
+ await expect(page.getByRole('link',{name:'Start Demo'})).toHaveCount(0);
 });
 
-test('projector presets, commands, fullscreen and alignment pattern operate on the standalone route',async({page},info)=>{
+test('a simulated edge is rejected before its history or frames can enter the workspace',async({page,baseURL})=>{
+ let historyReads=0;
+ const cors={'Access-Control-Allow-Origin':new URL(baseURL!).origin,'Access-Control-Allow-Headers':'authorization,content-type,x-spacegit-local','Access-Control-Allow-Methods':'GET,POST,OPTIONS'};
+ await page.route(edgeURL+'/api/v1/**',async route=>{
+  if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:cors});
+  const path=new URL(route.request().url()).pathname;
+  if(path.endsWith('/local-session'))return route.fulfill({headers:cors,json:{token:'test-live-only-connection'}});
+  if(path.endsWith('/rig'))return route.fulfill({headers:cors,json:{mode:'demo',enabled:true,feeds:[{id:1,status:'simulated'}]}});
+  if(path.endsWith('/commits'))historyReads++;
+  return route.fulfill({headers:cors,json:[]});
+ });
+ await page.goto('/world');
+ await page.getByRole('button',{name:'Connect cameras'}).click();
+ await expect(page.getByRole('alert').filter({hasText:'Start the edge in live mode'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Capture session',exact:true})).toBeDisabled();
+ await expect(page.locator('.nw-feed-art')).toHaveCount(0);
+ expect(historyReads).toBe(0);
+});
+
+test('projector controls, fullscreen and alignment pattern operate without fabricated geometry',async({page},info)=>{
  await page.goto('/project');
- await expect(page.getByRole('heading',{name:'Project',exact:true})).toBeVisible();
- await page.getByLabel('Viewing angle').selectOption('Corner');
- await page.getByRole('button',{name:'Add agent'}).click();
- await expect(page.getByText('Noor',{exact:false}).first()).toBeVisible();
- await page.getByText('Command an agent',{exact:true}).click();
- await page.getByRole('button',{name:'Send command'}).click();
- await expect(page.getByText('Command queued for Noor.')).toBeVisible();
- await page.getByRole('button',{name:'Pause',exact:true}).click();
+ await expect(page.getByText('Connect the local edge to load the current reconstruction.',{exact:true})).toBeVisible();
+ await expect(page.locator('canvas')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'+ sphere',exact:true})).toBeDisabled();
+ await page.getByRole('checkbox',{name:'Reduce quality'}).check();
  await page.getByRole('button',{name:'Test pattern'}).click();
  await page.getByRole('button',{name:'Fullscreen',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
@@ -112,52 +102,37 @@ test('projector presets, commands, fullscreen and alignment pattern operate on t
  await page.screenshot({path:info.outputPath('alignment.png'),animations:'disabled'});
  await page.evaluate(()=>document.exitFullscreen());
  await page.reload();
- await expect(page.getByLabel('Viewing angle')).toHaveValue('Corner');
+ await expect(page.getByRole('checkbox',{name:'Reduce quality'})).toBeChecked();
 });
 
-test('the selected projector receives a separate fullscreen window controlled by Project',async({page})=>{
+test('the connected projector receives the loaded model with a separate fullscreen output',async({page})=>{
  await page.addInitScript(()=>{
   const main={left:0,top:0,width:1440,height:1000,availLeft:0,availTop:0,availWidth:1440,availHeight:960,label:'Laptop',isPrimary:true,devicePixelRatio:1};
   const external={left:1440,top:0,width:1920,height:1080,availLeft:1440,availTop:0,availWidth:1920,availHeight:1040,label:'HDMI projector',isPrimary:false,devicePixelRatio:1};
   Object.defineProperty(window,'getScreenDetails',{value:async()=>Object.assign(new EventTarget(),{currentScreen:main,screens:[main,external]})});
-  const open=window.open.bind(window);
-  window.open=(url,target,features)=>{
-   document.documentElement.dataset.projectorPosition=features;
-   return open(url,target,features);
-  };
+  const open=window.open.bind(window);window.open=(url,target,features)=>{document.documentElement.dataset.projectorPosition=features;return open(url,target,features);};
  });
  await page.goto('/project');
+ await page.getByLabel('Open reconstructed scene').setInputFiles({name:'source.ply',mimeType:'application/octet-stream',buffer:Buffer.from('ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n1 0 0\n0 1 0\n')});
  await page.getByRole('button',{name:'Detect displays'}).click();
  await expect(page.getByLabel('Output display').locator('option:checked')).toHaveText(/HDMI projector/);
- const [output]=await Promise.all([
-  page.waitForEvent('popup'),
-  page.getByRole('button',{name:'Open projector window',exact:true}).click(),
- ]);
+ const [output]=await Promise.all([page.waitForEvent('popup'),page.getByRole('button',{name:'Open projector window',exact:true}).click()]);
  await expect(page.locator('html')).toHaveAttribute('data-projector-position',/left=1440.*width=1920/);
  const surface=output.getByRole('main',{name:'Projector output'});
  await expect(surface.locator('canvas')).toBeVisible();
- const closedWall=surface.locator('.nw-portal-reveal');
- await expect(closedWall).toHaveAttribute('data-open','true');
- const firstWall=await closedWall.elementHandle();
  await output.getByRole('button',{name:'Enter fullscreen'}).click();
  await expect.poll(()=>output.evaluate(()=>document.fullscreenElement?.getAttribute('aria-label'))).toBe('Projector output');
- await expect.poll(()=>firstWall!.evaluate(element=>element.isConnected)).toBe(false);
- await expect(closedWall).toHaveAttribute('data-open','true');
- await expect.poll(async()=>Number(await closedWall.locator('.nw-portal-leaf-left').evaluate(element=>getComputedStyle(element).opacity))).toBeLessThan(.001);
- await expect(page.getByRole('heading',{name:'Project',exact:true})).toBeVisible();
+ await expect(page.getByLabel('Live projector preview')).toBeVisible();
  await page.getByRole('button',{name:'Test pattern'}).click();
  await expect(surface.getByRole('img',{name:/Projection alignment grid/})).toBeVisible();
  await page.getByRole('button',{name:'Blackout'}).click();
- await expect(surface.locator('[aria-label="Output blacked out"]')).toBeVisible();
+ await expect(surface.getByLabel('Output blacked out')).toBeVisible();
  await page.getByRole('button',{name:'Show output'}).click();
- await expect(surface.locator('[aria-label="Output blacked out"]')).toHaveCount(0);
- await output.emulateMedia({reducedMotion:'reduce'});
- await page.getByRole('button',{name:'Virtual office'}).click();
- await expect(surface.locator('.nw-portal-reveal')).toHaveCount(0);
- await expect(surface.locator('canvas')).toBeVisible();
+ await expect(surface.getByLabel('Output blacked out')).toHaveCount(0);
  await page.getByRole('button',{name:'Test pattern'}).click();
+ await expect(surface.locator('canvas')).toBeVisible();
  await output.close();
- await expect(page.getByTestId('projector-surface').getByRole('img',{name:/Projection alignment grid/})).toBeVisible();
+ await expect(page.getByTestId('projector-surface').locator('canvas')).toBeVisible();
 });
 
 test('PLY loading, parse failure and recovery on a narrow viewport',async({page})=>{
@@ -170,9 +145,8 @@ test('PLY loading, parse failure and recovery on a narrow viewport',async({page}
  await expect(page.getByTestId('reconstruction').locator('canvas')).toBeVisible();
  await expect(page.getByRole('checkbox',{name:'Point cloud'})).toBeChecked();
  await page.getByRole('button',{name:'Open projector view'}).click();
- await page.getByRole('button',{name:'Physical world',exact:true}).click();
  await expect(page.getByTestId('projector-surface').locator('canvas')).toBeVisible();
- await page.getByRole('navigation',{name:'New Worlds workflow'}).getByRole('button',{name:'Reconstruct'}).click();
+ await page.getByRole('navigation',{name:'Workspace workflow'}).getByRole('button',{name:'Reconstruct'}).click();
  await upload.setInputFiles({name:'bad.ply',mimeType:'application/octet-stream',buffer:Buffer.from('invalid')});
  await expect(page.getByRole('alert').filter({hasText:'Provide a PLY'})).toBeVisible();
  await page.getByRole('button',{name:'Return to layout'}).click();

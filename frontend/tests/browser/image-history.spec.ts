@@ -108,6 +108,7 @@ test('complete saved rig sessions keep slot identity, original bytes and frame t
     if (request.method() === 'OPTIONS') return route.fulfill({status: 204, headers});
     if (path.endsWith('/local-session')) return route.fulfill({json: {token: 'loopback-session'}, headers});
     if (path.endsWith('/rig/captures')) return route.fulfill({json: [
+      {id: 'synthetic-old', created: 1700000000, mode: 'demo', feeds: [1,2,3,4]},
       {id: 'partial', created: 1700000000, mode: 'live', feeds: [1,2,3]},
       {id: 'complete', created: 1700000000, mode: 'live', feeds: [4,1,3,2], order: [4,1,3,2], frame_times: {'1': 1700000000.001, '2': 1700000000.002, '3': 1700000000.003, '4': 1700000000.004}},
     ], headers});
@@ -130,6 +131,7 @@ test('complete saved rig sessions keep slot identity, original bytes and frame t
   await page.getByText('Import a saved camera rig session', {exact: true}).click();
   await page.getByRole('button', {name: 'Connect edge & load sessions', exact: true}).click();
   const picker = page.getByRole('combobox', {name: 'Saved session', exact: true});
+  await expect(picker.locator('option[value="synthetic-old"]')).toHaveCount(0);
   await expect(picker.locator('option[value="partial"]')).toBeDisabled();
   await picker.selectOption('complete');
   await page.getByRole('button', {name: 'Import selected session', exact: true}).click();

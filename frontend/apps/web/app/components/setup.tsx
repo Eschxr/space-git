@@ -63,7 +63,7 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
  useEffect(()=>{
   if(!token)return;
   let alive=true;
-  const get=()=>api<Status>(token,'/status').then(r=>{if(alive)setStatus(r);}).catch(()=>{if(alive)setStatus(null);});
+  const get=()=>api<Status>(token,'/status').then(r=>{if(alive)setStatus(r);}).catch(error=>{if(alive){setStatus(null);setNotice(error.message);}});
   void get();const interval=setInterval(get,500);
   return()=>{alive=false;clearInterval(interval);};
  },[token]);
@@ -76,7 +76,7 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
   return()=>{alive=false;};
  },[token,deviceRefresh]);
  async function run(fn:()=>Promise<void>){setPending(true);setNotice('');try{await fn();}catch(e){setNotice((e as Error).message);}finally{setPending(false);}}
- const demo=s?.live?.mode==='demo',cal=s?.calibration;
+ const unavailable=s?.live?.mode!=='live',cal=s?.calibration;
  const automatic=s?.automatic_calibration;
  const autoRunning=automatic?.state==='running';
  const manualWizard=!!s?.wizard&&!s.wizard.kind;
@@ -84,7 +84,7 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
  const activeCamera=s?.camera_signature?.index;
  const selectedCamera=index??activeCamera??cameraOptions[0]?.index??0;
  const cameraLabel=(id:number)=>cameraOptions.find(camera=>camera.index===id)?.label??('Camera '+id);
- const cameraBusy=!s||demo||pending||autoRunning;
+ const cameraBusy=!s||unavailable||pending||autoRunning;
  const metrics=s?.camera_metrics;
  const monitors=s?.monitors??(token?devices?.monitors:undefined)??[];
  const displayCount=s?.display_count??(token?devices?.displays:undefined);
@@ -94,9 +94,9 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
  const ratio=w/h;
  const wallAspect=anchored&&rectify&&ratio>=.025&&ratio<=40?ratio:undefined;
  const projection=rectify&&!anchored;
- const canCalibrate=!!(s?.projector?.fullscreen&&s.live?.camera&&(!anchored||s.live.anchors.length===4)&&!demo);
+ const canCalibrate=!!(s?.projector?.fullscreen&&s.live?.camera&&(!anchored||s.live.anchors.length===4)&&!unavailable);
  const readyForPoint=!!(manualWizard&&s?.wizard?.shown&&s.wizard.index===points.length&&!pending&&!autoRunning&&points.length<12);
- const missingAutoRequirement = !s || demo ? 'Connect to the local edge in live mode.'
+ const missingAutoRequirement = !s || unavailable ? 'Connect to the local edge in live mode.'
   : s.display_count===1 ? 'Only one display detected. Connect the projector and select Extend with Win + P.'
   : !s.projector?.fullscreen ? 'Open the projector page on the external display and enter fullscreen.'
   : !s.projector.automatic_calibration ? 'Refresh the projector page and enter fullscreen again.'
@@ -112,11 +112,11 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
  const markPoint=(p:Pair)=>run(async()=>{
   const next=[...points,p];if(next.length<12)await api(token,'/calibration/point/'+next.length,{});setPoints(next);
  });
- if(process.env.NEXT_PUBLIC_SPACEGIT_PUBLIC==='1')return <section className="panel form-panel"><div className="panel-heading"><Icon name="lock"/><div><h2>Hardware setup runs locally</h2><p>This public demo cannot connect to a camera or projector. Start the local SpaceGit app on the projector workstation to calibrate.</p></div></div><Link className="btn primary" href="/studio/3d">Explore the demo wall <Icon name="arrow"/></Link></section>;
+ if(process.env.NEXT_PUBLIC_SPACEGIT_PUBLIC==='1')return <section className="panel form-panel"><div className="panel-heading"><Icon name="lock"/><div><h2>Hardware setup runs locally</h2><p>This page needs the local edge to connect to a camera or projector. Start the local SpaceGit app on the projector workstation to calibrate.</p></div></div><Link className="btn primary" href="/world">Open the workspace <Icon name="arrow"/></Link></section>;
  return <div className="stack">
  <section className="panel form-panel"><div className="panel-heading"><span className="step">01</span><div><h2>Connect the local edge</h2><p>Connect on this workstation or use the operator key printed by the start script.</p></div></div>
  {!token&&<div><button className="btn primary" disabled={pending} onClick={()=>void run(async()=>{await connectLocal();})}>Connect this workstation</button></div>}
- <form className="inline" onSubmit={e=>{e.preventDefault();setStatus(null);connect(key.trim());setKey('');}}><input aria-label="Operator key" type="password" placeholder="Local operator key" value={key} onChange={e=>setKey(e.target.value)} required/><button className="btn primary">Connect</button>{token&&<button className="btn" type="button" onClick={()=>{setStatus(null);connect('');}}>Disconnect</button>}<span className={'pill '+(s?'green':'')}>{s?demo?'DEMO / SIMULATED':'Edge connected':token?'Waiting for edge':'Offline'}</span></form></section>
+ <form className="inline" onSubmit={e=>{e.preventDefault();setStatus(null);connect(key.trim());setKey('');}}><input aria-label="Operator key" type="password" placeholder="Local operator key" value={key} onChange={e=>setKey(e.target.value)} required/><button className="btn primary">Connect</button>{token&&<button className="btn" type="button" onClick={()=>{setStatus(null);connect('');}}>Disconnect</button>}<span className={'pill '+(s?'green':'')}>{s?'Edge connected':token?'Waiting for edge':'Offline'}</span></form></section>
  <section className="panel form-panel"><div className="panel-heading"><span className="step">02</span><div><h2>Set up the camera</h2><p>Mount the camera firmly and frame the entire work surface.</p></div></div>
  <div className="fields">
   <label>Camera<select aria-label="Camera" disabled={cameraBusy} value={manualIndex?'manual':selectedCamera} onChange={e=>{
@@ -124,7 +124,7 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
    else {setIndex(Number(e.target.value));setManualIndex(false);}
   }}>
    {!manualIndex&&!cameraOptions.some(d=>d.index===selectedCamera)&&<option value={selectedCamera}>Camera {selectedCamera}</option>}
-   {cameraOptions.map(d=><option key={d.index} value={d.index}>{d.label}（{d.index}）</option>)}
+   {cameraOptions.map(d=><option key={d.index} value={d.index}>{d.label}ï¼ˆ{d.index}ï¼‰</option>)}
    <option value="manual">Enter a camera index</option>
   </select></label>
   {manualIndex&&<label>Camera index<input type="number" min={0} max={15} value={Number.isNaN(selectedCamera)?'':selectedCamera} disabled={cameraBusy} onChange={e=>setIndex(e.target.valueAsNumber)}/></label>}
@@ -143,20 +143,20 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
   <button className="btn" disabled={cameraBusy} onClick={()=>refreshDevices(v=>v+1)}>Refresh cameras</button>
   <button className="btn" disabled={!s?.live?.camera||pending||autoRunning} onClick={()=>run(async()=>{await api(token,'/devices/camera',undefined,'DELETE');})}>Stop camera</button>
  </div>
- {s&&!demo&&<p className="muted" role="status">{s.camera_signature?'Active camera: '+cameraLabel(s.camera_signature.index)+' · '+s.camera_signature.resolution.join(' × ')+(anchored?' · Wall markers '+[...(s.live?.anchors??[])].sort().join(', '):''):s.camera_error}</p>}
+ {s&&!unavailable&&<p className="muted" role="status">{s.camera_signature?'Active camera: '+cameraLabel(s.camera_signature.index)+' · '+s.camera_signature.resolution.join(' × ')+(anchored?' · Wall markers '+[...(s.live?.anchors??[])].sort().join(', '):''):s.camera_error}</p>}
  {metrics&&<section aria-label="Camera diagnostics" className="camera-diagnostics">
   <strong>Camera diagnostics · {metrics.grade}</strong>
   <p>{metrics.fps?.toFixed(1)??'Measuring'} fps · Brightness {metrics.brightness.toFixed(0)}/255 · Sharpness {metrics.sharpness.toFixed(0)}</p>
   <p className="muted">{Math.round(metrics.underexposed*100)}% dark · {Math.round(metrics.overexposed*100)}% clipped bright · {metrics.processing_ms.toFixed(0)} ms edge processing{metrics.delivery_shortfall!==null?` · ${Math.round(metrics.delivery_shortfall*100)}% below reported FPS`:''}</p>
   {['Limited','Unsuitable'].includes(metrics.grade)&&<p className="warning">Improve lighting or focus. Choose a lower resolution if the frame rate stays low.</p>}
  </section>}
- {s&&!demo&&(deviceError||devices&&!cameraOptions.length)&&<p className="muted">No cameras were listed. Connect a webcam and refresh, or enter its index.</p>}
+ {s&&!unavailable&&(deviceError||devices&&!cameraOptions.length)&&<p className="muted">No cameras were listed. Connect a webcam and refresh, or enter its index.</p>}
  {!manualWizard&&<>
   <label className="inline"><input type="checkbox" checked={rectify} onChange={e=>setRectify(e.target.checked)}/>Crop and straighten preview</label>
   {projection&&s?.live?.camera&&<p className="muted">{s.projection_preview?'Preview aligned to the projected image.':'Calibrate the projector to crop and straighten this preview.'}</p>}
   <CameraPreview key={activeCamera} token={s?.live?.camera?token:''} wallAspect={workspacePoints?undefined:wallAspect} projection={projection&&!workspacePoints} outline={workspacePoints??(!s?.projection_preview?s?.workspace?.corners:undefined)} onPoint={workspacePoints&&workspacePoints.length<4?p=>setWorkspacePoints([...workspacePoints,p]):undefined}/>
  </>}
- {!demo&&<div className="stack">
+ {!unavailable&&<div className="stack">
   <div className="inline"><button className="btn" disabled={cameraBusy||!s?.live?.camera||!!s.wizard} onClick={()=>setWorkspacePoints([])}>Define camera workspace</button>
    {s?.workspace&&<span className="pill green">{s.workspace.units==='m'?`Workspace · ${s.workspace.wall.join(' × ')} m`:'Workspace · normalized coordinates'}</span>}
    {s?.workspace&&<Link className="btn" href="/studio/live">Start tracking</Link>}</div>
@@ -169,7 +169,7 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
    })}>Save workspace</button><button className="btn" onClick={()=>setWorkspacePoints(workspacePoints.slice(0,-1))}>Undo corner</button><button className="btn" onClick={()=>setWorkspacePoints(null)}>Cancel</button></div>
   </>}
  </div>}
- <LensTool token={token} enabled={!!(s?.live?.camera&&!demo&&!autoRunning)} lens={s?.intrinsics??null} views={s?.lens_views??0}/>
+ <LensTool token={token} enabled={!!(s?.live?.camera&&!unavailable&&!autoRunning)} lens={s?.intrinsics??null} views={s?.lens_views??0}/>
  </section>
  <section className="panel form-panel" id="projector-calibration"><div className="panel-heading"><span className="step">03</span><div><h2>Register the projector</h2><p>Frame the entire projection in the camera. Enter fullscreen on the projector, then run automatic calibration.</p></div></div>
  <div className="inline"><Link className="btn" href="/projector" target="_blank"><Icon name="screen"/> Open projector <Icon name="external" size={14}/></Link><span className={'pill '+(s?.projector?.fullscreen?'green':'')} role="status">{projectorStatus}</span></div>
@@ -205,8 +205,8 @@ export function Setup({token,connect,connectLocal}:{token:string;connect:(v:stri
   setPoints([]);
  })}>Validate and save</button>}
  {s?.projection_preview&&!anchored&&<><p role="status">Projector alignment active · worst error {s.projection_preview.max_px.toFixed(2)} px</p><ResidualPlot residuals={s.projection_preview.residuals??[]}/></>}
- {anchored&&cal&&!demo&&<><div className="inline"><span className={'pill '+(s?.live?.calibration?.id===cal.id&&!s.live.calibration_reason?'green':'warning')}>{s?.live?.calibration?.id===cal.id&&!s.live.calibration_reason?'ACTIVE FIT · VALIDATED IN PIXELS':'SAVED FIT'}</span><span className="mono muted">Saved {cal.id.slice(0,8)} · mean {cal.mean_px.toFixed(2)} px · worst {cal.max_px.toFixed(2)} px · limit {cal.limit_px??'—'} px</span></div><ResidualPlot residuals={cal.residuals??[]}/></>}
- {s?.live?.calibration_reason&&!demo&&!autoRunning&&!manualWizard&&<p className="warning">{s.live.calibration_reason}</p>}
+ {anchored&&cal&&!unavailable&&<><div className="inline"><span className={'pill '+(s?.live?.calibration?.id===cal.id&&!s.live.calibration_reason?'green':'warning')}>{s?.live?.calibration?.id===cal.id&&!s.live.calibration_reason?'ACTIVE FIT · VALIDATED IN PIXELS':'SAVED FIT'}</span><span className="mono muted">Saved {cal.id.slice(0,8)} · mean {cal.mean_px.toFixed(2)} px · worst {cal.max_px.toFixed(2)} px · limit {cal.limit_px??'—'} px</span></div><ResidualPlot residuals={cal.residuals??[]}/></>}
+ {s?.live?.calibration_reason&&!unavailable&&!autoRunning&&!manualWizard&&<p className="warning">{s.live.calibration_reason}</p>}
  {notice&&<p role="status" className="notice">{notice}</p>}
- </section><PhysicalDiagnostics token={token} enabled={!!(s?.live?.camera&&s.live.projection_ready&&!demo)} wizard={s?.wizard??null}/></div>;
+ </section><PhysicalDiagnostics token={token} enabled={!!(s?.live?.camera&&s.live.projection_ready&&!unavailable)} wizard={s?.wizard??null}/></div>;
 }

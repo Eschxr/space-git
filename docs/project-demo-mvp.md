@@ -1,10 +1,10 @@
-# Project demo MVP
+# Project: real reconstructed geometry
 
-`/project` is the demo control page. The left side previews the output, and the
+`/project` is the projector control page. The left side previews the output, and the
 right side contains the Ollama scene assistant, object controls and existing
 projector settings. Open a separate projector window, move it to your extended
 display and enter fullscreen there. The page keeps a live video of its WebGL
-canvas. There is one renderer and simulation; the preview cannot drift to a
+canvas. There is one renderer; the preview cannot drift to a
 different camera. Grid and blackout apply to both outputs.
 
 ## Run locally
@@ -41,11 +41,11 @@ or selected through an external paid service by the application.
    without falling back to simulated geometry.
    Use **Open reconstructed scene** to load one PLY, GLB or self-contained glTF.
    You can also send a loaded model from Reconstruct with **Open projector view**.
-   The virtual office remains an explicitly labeled simulation for rehearsals.
+   No source scene is fabricated if geometry is unavailable.
 2. Try “Add a blue floating sphere”, then “Make it spin and move it left”.
    Text conversation and the current object state travel to Ollama. Source
    images and reconstruction bytes are not sent. The model does not see the room.
-3. Quick-add a sphere, cube, torus or cone without a model connection. Select an
+3. After loading source geometry, add a sphere, cube, torus or cone without a model connection. Select an
    object to adjust its color, animation, relative position and size. Available
    animations are spin, float and pulse. Pause, remove, clear and undo are provided.
 4. Open the projector window. Keep the Project page open to edit the shared output.
@@ -79,8 +79,7 @@ decorative GLBs, surface anchoring and saved projects are future extensions.
 
 Edits and conversation last for the mounted Project session; reload/navigation
 resets them. Undo retains the last 40 object states. Original files and committed
-history are untouched. Reduced-motion preferences disable added animations in the
-office renderer. Live preview requires canvas capture (verified in Chrome); output
+history are untouched. Pause added animations using the control panel or Space. Live preview requires canvas capture (verified in Chrome); output
 still works if capture is unavailable and a visible message explains the limitation.
 
 ## Checks

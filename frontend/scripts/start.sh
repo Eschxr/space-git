@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export SPACEGIT_MODE="${1:-demo}"
+export SPACEGIT_MODE="${1:-live}"
 export SPACEGIT_LOCAL_SESSION=1
-case "$SPACEGIT_MODE" in demo|live) ;; *) echo "Use demo or live" >&2; exit 2;; esac
+case "$SPACEGIT_MODE" in live) ;; *) echo "Use live" >&2; exit 2;; esac
 sg_python="${SPACEGIT_PYTHON:-.venv/bin/python}"
 sg_web_port="${SPACEGIT_WEB_PORT:-3000}"
 sg_edge_port="${SPACEGIT_EDGE_PORT:-8000}"

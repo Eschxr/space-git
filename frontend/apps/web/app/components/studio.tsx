@@ -5,7 +5,6 @@ import {useRouter} from 'next/navigation';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {Object3D} from 'three';
 import type {Card,Commit,Live,Scene,VisualPlacement} from '../../../../packages/protocol/types';
-import fixture from '../../../../fixtures/gallery.json';
 import {Brand,Icon} from './icons';
 import {api,apiBase,useLive,useToken} from './connection';
 import {OverlayView,statusLabel} from './overlay';
@@ -16,10 +15,8 @@ import {Capture} from './capture-v2';
 import {download,exportGLB,importModel,parseModel} from './io';
 import {VisualLayer,defaultPlacement} from './visual-layer';
 import {PlacementRules} from './placement-rules';
-import {Rehearsal} from './rehearsal';
 
 const View=dynamic(()=>import('./scene-view'),{ssr:false,loading:()=> <div className="blank skeleton">Loading the 3D workspace…</div>});
-const gallery=fixture as Scene;
 const empty:HistoryData={branches:{},commits:[]};
 const nav=[
  ['overview','/studio','grid','Overview'],['live','/studio/live','live','Live tracking'],['model','/studio/3d','cube','3D workspace'],['history','/studio/history','history','History'],['merge','/studio/merge','branch','Branch & merge'],['capture','/studio/capture','camera','Phone capture'],['setup','/setup','target','Hardware setup']
@@ -34,10 +31,10 @@ function LivePanel({event,token,run,data,refresh}:{event:Live|null;token:string;
  const [tolerance,setTolerance]=useState(25),[dwell,setDwell]=useState(.7);
  const pid=event?.plan?.id??plan;
  useEffect(()=>{if(!token||!pid)return;let done=false;const poll=()=>api<{events:typeof events}>(token,'/deployments/'+pid).then(r=>{if(!done)setEvents(r.events);}).catch(()=>{});void poll();const timer=setInterval(poll,600);return()=>{done=true;clearInterval(timer);};},[pid,token]);
- const command=async(replay=false)=>{if(!rev)throw Error('Save a scene first');const p=await api<{id:string}>(token,'/deployments',{commit:rev,tolerance_mm:tolerance,dwell_s:dwell,...(replay?{object_id:'a'}:{})});setPlan(p.id);setEvents([]);if(replay)await api(token,'/demo/replay',{});};
+ const command=async()=>{if(!rev)throw Error('Save a scene first');const p=await api<{id:string}>(token,'/deployments',{commit:rev,tolerance_mm:tolerance,dwell_s:dwell});setPlan(p.id);setEvents([]);};
  return <div className="stack"><div className="split-view"><section className="panel form-panel"><div className="panel-heading"><Icon name="target"/><div><h2>Projection monitor</h2><p>Local view of the edge service’s overlay.</p></div></div>
  <div className="projection-preview"><OverlayView event={event} output={event?.calibration?.output}/></div>
- <div className="inline"><Link className="btn" href="/projector" target="_blank"><Icon name="screen"/> Open projector</Link>{event?.mode==='demo'&&<button className="btn primary" onClick={()=>run(()=>command(true))}>Replay one move</button>}{event?.plan&&<button className="btn" onClick={()=>run(async()=>{await api(token,'/deployments/active',undefined,'DELETE');})}>Stop guidance</button>}</div>
+ <div className="inline"><Link className="btn" href="/projector" target="_blank"><Icon name="screen"/> Open projector</Link>{event?.plan&&<button className="btn" onClick={()=>run(async()=>{await api(token,'/deployments/active',undefined,'DELETE');})}>Stop guidance</button>}</div>
  <label>Restore revision<select value={rev??''} onChange={e=>choose(e.target.value)}>{data.commits.map(c=><option key={c.id} value={c.id}>{c.message} · {c.id.slice(0,8)}</option>)}</select></label>
  <div className="fields"><label>Position tolerance (mm)<input type="number" min={5} max={75} value={tolerance} onChange={e=>setTolerance(Number(e.target.value))}/></label><label>Stable dwell (s)<input type="number" min={.35} max={5} step={.05} value={dwell} onChange={e=>setDwell(Number(e.target.value))}/></label></div>
  {event?.calibration_reason&&<p className="warning">{event.calibration_reason}</p>}
@@ -47,10 +44,10 @@ function LivePanel({event,token,run,data,refresh}:{event:Live|null;token:string;
   await api(token,'/deployments/active/confirm',{});await refresh();
  })}>Save verified restore</button>}
  </section><section className="panel form-panel"><div className="panel-heading"><Icon name="camera"/><div><h2>Camera observations</h2><p>Select a textured object to track its position and rotation.</p></div></div>
- {event?.mode!=='demo'&&<Tracking event={event} token={token} data={data} run={run} refresh={refresh}/>}
+ {<Tracking event={event} token={token} data={data} run={run} refresh={refresh}/>}
  {!event?.tracked?.length&&event?.poses.length?<div className="object-list">{event.poses.map(p=><div key={p.marker}><span className="marker-num">{p.marker}</span><div><strong>Marker {p.marker}</strong><small>{p.x.toFixed(3)}, {p.y.toFixed(3)} m</small></div><span className="mono muted">{Math.round(p.confidence*100)}%</span></div>)}</div>:null}
  </section></div>
- <section className="panel form-panel"><h2>Verification evidence</h2>{event?.plan?.saved&&<p className="notice">Measured layout saved as revision <Link href={'/studio/3d?revision='+event.plan.saved}>{event.plan.saved.slice(0,8)}</Link>.</p>}{event?.plan?.save_error&&<p className="notice warning">{event.plan.save_error}</p>}{events.length?<ul className="diff-list">{events.map(e=><li key={e.object}><span className="green-text">✓ {e.object.toUpperCase()}</span> · {(e.distance_m*1000).toFixed(1)} mm · {e.dwell_s.toFixed(2)} s dwell · {e.mode==='demo'?'simulated':'camera verified'}</li>)}</ul>:<p className="muted">A verification appears after fresh observations hold within tolerance.</p>}</section>
+ <section className="panel form-panel"><h2>Verification evidence</h2>{event?.plan?.saved&&<p className="notice">Measured layout saved as revision <Link href={'/studio/3d?revision='+event.plan.saved}>{event.plan.saved.slice(0,8)}</Link>.</p>}{event?.plan?.save_error&&<p className="notice warning">{event.plan.save_error}</p>}{events.length?<ul className="diff-list">{events.filter(e=>e.mode==='live').map(e=><li key={e.object}><span className="green-text">✓ {e.object.toUpperCase()}</span> · {(e.distance_m*1000).toFixed(1)} mm · {e.dwell_s.toFixed(2)} s dwell · camera verified</li>)}</ul>:<p className="muted">A verification appears after fresh observations hold within tolerance.</p>}</section>
  </div>;
 }
 
@@ -76,22 +73,24 @@ export default function Studio({mode}:{mode:Mode}){
  const connected=!!token&&data.commits.length>0;
  const tip=connected?data.branches[branch]:'';
  const current=connected?data.commits.find(c=>c.id===(revision||tip)):undefined;
- const base=current?.scene??gallery;
- const calWall=event?.mode==='live'&&base.objects.length===0&&event.calibration&&event.state!=='CALIBRATION_DRIFT';
+ const base=current?.scene;
+ const calWall=event?.mode==='live'&&base?.objects.length===0&&event.calibration&&event.state!=='CALIBRATION_DRIFT';
  const scene=edit??base;
  const baseline=data.commits.find(c=>c.id===compare);
- const changed=baseline?new Set(scene.objects.filter(o=>JSON.stringify(o)!==JSON.stringify(baseline.scene.objects.find(p=>p.id===o.id))).map(o=>o.id)):undefined;
- const active=scene.objects.find(o=>o.id===selected)??scene.objects[0];
+ const changed=baseline&&scene?new Set(scene.objects.filter(o=>JSON.stringify(o)!==JSON.stringify(baseline.scene.objects.find(p=>p.id===o.id))).map(o=>o.id)):undefined;
+ const active=scene?.objects.find(o=>o.id===selected)??scene?.objects[0];
  const name=nav.find(([k])=>k===mode)?.[3]??'Overview';
  const model=mode==='model', workspace=mode==='overview'||model;
  const meshView=!!extra&&focus;
- const label=event?.mode==='live'?(event.camera?'CAMERA ACTIVE':'CAMERA OFF'):event?.mode==='demo'?'DEMO / SIMULATED':connected?'EDGE CONNECTED':'DEMO / READ ONLY';
- const update=(field:keyof Card,value:string|number)=>{if(!active)return;setEdit({...scene,objects:scene.objects.map(o=>o.id===active.id?{...o,[field]:value}:o)});};
+ const label=event?.mode==='live'?(event.camera?'CAMERA ACTIVE':'CAMERA OFF'):connected?'EDGE CONNECTED':'EDGE DISCONNECTED';
+ const update=(field:keyof Card,value:string|number)=>{if(!active||!scene)return;setEdit({...scene,objects:scene.objects.map(o=>o.id===active.id?{...o,[field]:value}:o)});};
  async function save(fromCamera=false){
+  if(!scene)throw Error('Load a real scene first.');
   const c=await api<Commit>(token,'/commits',{scene,branch,expected:tip,observed:fromCamera,message:message.trim()||(fromCamera?'Capture observed layout':'Update wall layout')});
   setEdit(null);setRevision('');setMessage('');setNote('Saved revision '+c.id.slice(0,8));await refresh();
  }
  function add(){
+  if(!scene)return;
   const marker=Array.from({length:246},(_,i)=>i+4).find(m=>!scene.objects.some(o=>o.marker===m));if(marker===undefined)return;
   const seen=event?.poses.find(p=>!scene.objects.some(o=>o.marker===p.marker));
   const id='object-'+crypto.randomUUID().slice(0,8);
@@ -99,10 +98,10 @@ export default function Studio({mode}:{mode:Mode}){
   setEdit({...scene,objects:[...scene.objects,card]});setSelected(id);
  }
  return <div className="studio">
- <aside className="sidebar"><Brand/><div className="workspace-id"><span className="workspace-icon"><Icon name="cube" size={20}/></span><div><strong>{base.name}</strong><small>LOCAL WORKSPACE</small></div></div>
+ <aside className="sidebar"><Brand/><div className="workspace-id"><span className="workspace-icon"><Icon name="cube" size={20}/></span><div><strong>{base?.name??'No saved scene'}</strong><small>LOCAL WORKSPACE</small></div></div>
  <div className="nav-label">WORKSPACE</div><nav aria-label="Studio">{nav.slice(0,6).map(([key,url,icon,title])=><Link href={url} className={mode===key?'active':''} aria-current={mode===key?'page':undefined} key={key}><Icon name={icon}/><span>{title}</span></Link>)}</nav>
  <div className="nav-label hardware">DEVICES</div><nav aria-label="Hardware"><Link href="/setup" aria-current={mode==='setup'?'page':undefined} className={mode==='setup'?'active':''}><Icon name="target"/><span>Hardware setup</span></Link><Link href="/projector" target="_blank"><Icon name="screen"/><span>Projector</span><Icon name="external" size={12}/></Link></nav>
- <div className="side-bottom"><span className="signal-dot"/><div><strong>{connected?'Local edge':'Preview workspace'}</strong><small>{connected?'Operator session':'Connect in Hardware setup'}</small></div></div>
+ <div className="side-bottom"><span className="signal-dot"/><div><strong>{connected?'Local edge':'Disconnected'}</strong><small>{connected?'Operator session':'Connect in Hardware setup'}</small></div></div>
  </aside>
  <div className="studio-main">
  <header className="studio-bar"><div className="breadcrumb"><span>Workspace</span><Icon name="chevron" size={13}/><strong>{name}</strong></div><div><span className={'pill '+(event?.mode==='live'&&event.camera?'green':'warning')}><span className="signal-dot"/> {label}</span><Link className="btn tiny top-action" href="/projector" target="_blank"><Icon name="screen" size={15}/> Projector</Link></div></header>
@@ -113,8 +112,8 @@ export default function Studio({mode}:{mode:Mode}){
  {mode==='capture'&&<Capture data={data} token={token} run={run}/>}
  {mode==='history'&&<History data={data} token={token} run={run} refresh={refresh} open={id=>router.push('/studio/3d?revision='+encodeURIComponent(id))}/>}
  {mode==='merge'&&<MergeFlow data={data} token={token} run={run} refresh={refresh}/>}
- {mode==='live'&&<>{error&&<p className="notice warning">{error}</p>}{token?<LivePanel event={event} token={token} run={run} data={data} refresh={refresh}/>:<Rehearsal/>}</>}
- {workspace&&<>
+ {mode==='live'&&<>{error&&<p className="notice warning">{error}</p>}{token?<LivePanel event={event} token={token} run={run} data={data} refresh={refresh}/>:<section className="panel blank">Connect the live edge in Hardware setup to view camera observations.</section>}</>}
+ {workspace&&scene&&<>
  {model&&<RevisionParam select={setRevision} asset={setAsset}/>}
  <div className="workspace-grid"><section className="panel viewport-panel"><div className="viewport-top"><div><Icon name="cube"/><strong>{meshView?'Visual layer':scene.name}</strong><span className="pill">{meshView?opened?'RECONSTRUCTED MESH':'IMPORTED MESH':'PARAMETRIC 3D'}</span></div><button className="btn tiny" onClick={()=>setReset(reset+1)}><Icon name="rotate" size={15}/> Reset view</button></div>
  <div className="viewport" ref={viewport}><View scene={observed&&event?.poses.length?{...scene,objects:scene.objects.map(o=>{const p=event.poses.find(p=>p.marker===o.marker);return p?{...o,x:p.x,y:p.y,angle:p.angle}:o;})}:scene} selected={active?.id??''} onSelect={setSelected} reset={reset} extra={extra} changed={changed} visualOnly={!!extra&&focus} placement={placement}/><div className="view-label"><span className="signal-dot"/> {extra&&focus?'VISUAL GEOMETRY':observed&&event?.poses.length?'OBSERVED POSES':'WALL FRAME'} <span> / </span> {extra&&focus?'RAW FRAME':'METERS'}</div><div className="view-axes"><span>X</span><span>Y</span><span>Z</span></div></div>
@@ -144,9 +143,10 @@ export default function Studio({mode}:{mode:Mode}){
   if(!png)throw Error('The viewport could not be exported.');
   download(png,'spacegit-view.png');
  })}><Icon name="download"/> Export screenshot</button>
- <label className="file-button btn">Import model<input type="file" accept=".glb,.json" aria-label="Import model" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)run(async()=>{const r=await importModel(file);if(r.scene){setEdit({...r.scene,id:base.id});setRevision('');setNote('Imported scene with '+r.scene.objects.length+' stable object IDs.');}if(r.mesh){setAsset('');setOpened('');setPlacement(defaultPlacement());setExtra(r.mesh);setFocus(true);setNote('Imported auxiliary geometry. It is not registered to the wall.');}});}}/></label>{extra&&<button className="btn" onClick={()=>{setExtra(null);setAsset('');setOpened('');}}>Remove auxiliary model</button>}</div>
- </section>:<div className="summary-grid"><Link className="panel metric" href="/studio/live"><Icon name="live"/><div><small>TRACKING</small><strong>{event?statusLabel[event.state]:'Preview'}</strong></div><Icon name="chevron" size={15}/></Link><Link className="panel metric" href="/studio/history"><Icon name="history"/><div><small>REVISION</small><strong>{current?.message??'Gallery baseline'}</strong></div><Icon name="chevron" size={15}/></Link><Link className="panel metric" href="/setup"><Icon name="target"/><div><small>CALIBRATION</small><strong>{event?.mode==='demo'?'Fixture geometry':event?.calibration?'Validated geometry':'Hardware setup'}</strong></div><Icon name="chevron" size={15}/></Link></div>}
+ <label className="file-button btn">Import model<input type="file" accept=".glb,.json" aria-label="Import model" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)run(async()=>{const r=await importModel(file);if(r.scene){setEdit({...r.scene,id:base?.id??r.scene.id});setRevision('');setNote('Imported scene with '+r.scene.objects.length+' stable object IDs.');}if(r.mesh){setAsset('');setOpened('');setPlacement(defaultPlacement());setExtra(r.mesh);setFocus(true);setNote('Imported auxiliary geometry. It is not registered to the wall.');}});}}/></label>{extra&&<button className="btn" onClick={()=>{setExtra(null);setAsset('');setOpened('');}}>Remove auxiliary model</button>}</div>
+ </section>:<div className="summary-grid"><Link className="panel metric" href="/studio/live"><Icon name="live"/><div><small>TRACKING</small><strong>{event?statusLabel[event.state]:'Disconnected'}</strong></div><Icon name="chevron" size={15}/></Link><Link className="panel metric" href="/studio/history"><Icon name="history"/><div><small>REVISION</small><strong>{current?.message??'No saved revision'}</strong></div><Icon name="chevron" size={15}/></Link><Link className="panel metric" href="/setup"><Icon name="target"/><div><small>CALIBRATION</small><strong>{event?.calibration?'Validated geometry':'Hardware setup'}</strong></div><Icon name="chevron" size={15}/></Link></div>}
  </>}
+ {workspace&&!scene&&<section className="panel blank"><h2>No recorded scene</h2><p>Connect the live edge and select a saved revision, or open a reconstruction file in the workspace.</p><Link className="btn primary" href="/world">Open workspace</Link></section>}
  {model&&extra&&<VisualLayer key={opened||extra.uuid} value={placement} change={setPlacement} focus={focus} setFocus={setFocus} registered={!!opened} busy={busy}
   save={()=>run(async()=>{const saved=await api<VisualPlacement>(token,'/assets/'+opened+'/placement',placement);setPlacement(saved);setNote('Visual placement saved for this revision.');})}/>}
  </main></div></div>;

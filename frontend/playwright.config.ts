@@ -11,7 +11,7 @@ export default defineConfig({
  webServer:[
   {command:'pnpm start',url:'http://127.0.0.1:3000',timeout:60000,env:{NEXT_TELEMETRY_DISABLED:'1'}},
   {command:python+' -m uvicorn spacegit_edge.main:app --app-dir apps/edge --host 127.0.0.1 --port 8000 --no-access-log',url:'http://127.0.0.1:8000/health',timeout:15000,
-   env:{SPACEGIT_TOKEN:testToken,SPACEGIT_MODE:process.env.SPACEGIT_TEST_LIVE==='1'?'live':'demo',SPACEGIT_DATA:'test-results/edge-'+randomUUID(),
+   env:{SPACEGIT_TOKEN:testToken,SPACEGIT_MODE:'live',SPACEGIT_DATA:'test-results/edge-'+randomUUID(),
     ...(process.env.SPACEGIT_TEST_HTTPS==='1'?{SPACEGIT_MOBILE_ORIGIN:'https://[::1]:3443'}:{})}}
  ],
  outputDir:'test-results/artifacts',

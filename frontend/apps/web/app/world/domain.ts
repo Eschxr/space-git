@@ -17,28 +17,13 @@ export type Capture = {id: string; created: number; mode: 'demo'|'live'; feeds: 
 export type History = {branches: Record<string, string>; commits: Commit[]};
 export type Asset = {id: string; name: string; label: string; job?: Job};
 export type Delta = {id: string; label: string; kind: 'added'|'missing'|'moved'|'unchanged'|'modified'; before?: Card; after?: Card; fields: string[]};
-export const DEMO_RIG: Rig = {mode: 'demo', enabled: false, feeds: CAMERAS.map(({id}) => ({id, status:'simulated', age_ms: null}))};
+export const EMPTY_RIG: Rig = {mode: 'live', enabled: false, feeds: CAMERAS.map(({id}) => ({id, status:'offline', age_ms: null}))};
 
-const cards: Card[] = [
-  {id:'task-lamp', marker:10, name:'Task lamp', x:1.2, y:1.3, angle:0, w:.24,h:.55,d:.24},
-  {id:'notebook', marker:11, name:'Notebook', x:2.2, y:.96, angle:0, w:.25,h:.04,d:.30},
-  {id:'mug', marker:12, name:'Ceramic mug', x:1.65, y:1.02, angle:0, w:.14,h:.16,d:.14},
-  {id:'plant', marker:13, name:'Potted plant', x:3.35, y:1.25, angle:0, w:.38,h:.58,d:.34},
-];
-export function sampleScene(sample: number): Scene {
-  return {version:1, id:'room-01', name:'Room 01 · Study', frame:'wall-world-meters', wall:[5.4,3.1],
-    objects:cards.map(card => ({...card, x: sample % 2 && card.id === 'mug' ? 2.75 : card.x}))};
-}
 export const EMPTY_HISTORY: History = {branches:{}, commits:[]};
-export function demoCapture(sample: number, created = Date.now() / 1000, id = crypto.randomUUID()): Capture {
-  return {id,created,mode:'demo',feeds:[1,2,3,4],sample};
-}
-export function commitDemo(history: History, capture: Capture, branch: string, message: string, id = capture.id): History {
-  if (capture.mode !== 'demo' || capture.sample === undefined) throw Error('Select a simulated capture.');
-  if (history.commits.some(commit => commit.id === id)) return history;
-  const tip = history.branches[branch];
-  const commit: Commit = {id, message, parents: tip ? [tip] : [], time:capture.created, scene:sampleScene(capture.sample), evidence:{mode:'demo',timestamp:capture.created}};
-  return {branches:{...history.branches,[branch]:id},commits:[commit,...history.commits]};
+export function realHistory(history:History):History {
+  const commits=history.commits.filter(commit=>commit.evidence?.mode!=='demo');
+  const ids=new Set(commits.map(commit=>commit.id));
+  return {commits,branches:Object.fromEntries(Object.entries(history.branches).filter(([,id])=>ids.has(id)))};
 }
 
 export function sameSceneReference(before: Scene, after: Scene): boolean {
@@ -80,12 +65,7 @@ export function explainDiff(rows: Delta[], frame: Scene['frame']|null): string {
   return summary.join(' ');
 }
 
-export const DEMO_STEPS = [
-  'Inspect the four feeds','Capture the initial state','Commit the initial state','Capture and commit a changed scene',
-  'Compare the revisions','Reconstruct the study','Open the virtual office','Activate projector view','Watch the office come alive',
-] as const;
-
-export const DEFAULT_PROJECTION = {brightness:100,contrast:100,angle:'Portal' as 'Portal'|'Corner'|'Wide', lowPower:false};
+export const DEFAULT_PROJECTION = {brightness:100,contrast:100,lowPower:false};
 export type Projection = typeof DEFAULT_PROJECTION;
 export function readProjection(): Projection {
   try {
@@ -93,7 +73,6 @@ export function readProjection(): Projection {
     return {
       brightness: Number.isFinite(raw.brightness) ? Math.min(160,Math.max(40,raw.brightness)) : 100,
       contrast: Number.isFinite(raw.contrast) ? Math.min(160,Math.max(60,raw.contrast)) : 100,
-      angle: ['Portal','Corner','Wide'].includes(raw.angle) ? raw.angle : 'Portal',
       lowPower: raw.lowPower === true,
     };
   } catch {return DEFAULT_PROJECTION;}

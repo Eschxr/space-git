@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const files=['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','vercel.json',
  'apps/web/package.json','apps/web/next.config.ts','apps/web/tsconfig.json','apps/web/eslint.config.mjs',
- 'packages/design/tokens.css','packages/protocol/types.ts','fixtures/gallery.json','fixtures/replay.json'];
+ 'packages/design/tokens.css','packages/protocol/types.ts'];
 for(const prefix of ['apps/web/app','apps/web/public']){
  for(const relative of fs.readdirSync(prefix,{recursive:true,withFileTypes:true})){
   if(relative.isFile())files.push(path.join(relative.parentPath,relative.name).replaceAll(path.sep,'/'));

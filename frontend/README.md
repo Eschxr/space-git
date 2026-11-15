@@ -2,7 +2,7 @@
 
 Version control for physical spaces. Save a measured wall layout, compare it with a later revision, and use a local projector and camera to guide and verify a restore. The browser shows the same scene as editable, metric Three.js geometry. Camera images stay on the workstation.
 
-[Open the public read-only demo](https://spacegit-3d.vercel.app).
+The workspace uses live services and operator-provided reconstruction files.
 
 The local **Image history** workspace connects Scene Tracker to saved spaces,
 immutable four-camera captures, YOLOE/DINOv2 processing, human review and approved
@@ -13,16 +13,17 @@ After installing the Python edge dependencies, use
 `scripts/start.ps1 -Mode live -Port 3101 -EdgePort 8002` to start its web and camera services.
 Metric layouts, 3D viewers and projector tools remain available alongside image history.
 
-The [Project demo MVP](../docs/project-demo-mvp.md) adds an Ollama prompt panel,
+The [Project workspace](../docs/project-demo-mvp.md) adds an Ollama prompt panel,
 animated 3D additions, manual edits and undo. A live preview stays on the page
 while the separate projector window is open. It uses your installed Ollama models;
-quick-add controls also work without a model connection.
+manual feature controls work on loaded geometry without a model connection.
 
-## New Worlds demo
+## Real-data workflow
 
-Run `pnpm install --frozen-lockfile` and `pnpm dev`, then open [SpaceGit](http://127.0.0.1:3000) and click **Start Demo**. The guided flow captures a simulated room, compares two commits, opens the scene in 3D, and projects an animated virtual office. Open [Project](http://127.0.0.1:3000/project) on your second monitor for fullscreen output and an alignment pattern.
-
-See the [New Worlds operator guide](docs/new-worlds.md) for the four-camera pole configuration, projection shortcuts, tests, and Vercel preview commands.
+Open `/world` for Capture, Version control, Reconstruct and Project. Connect the
+live edge or open a reconstruction file. Missing services/data show an explicit
+empty or error state. There are no bundled scenes, synthetic captures or walkthrough.
+See the [workspace guide](docs/new-worlds.md) for projector controls and setup.
 
 ## Start on Windows
 
@@ -33,10 +34,13 @@ pnpm install --frozen-lockfile
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r apps/edge/requirements.txt
 .\scripts\doctor.ps1
-.\scripts\start.ps1 -Mode demo
+.\scripts\start.ps1 -Mode live
 ```
 
-Open [Hardware setup](http://127.0.0.1:3000/setup) and paste the printed local operator key. Go to **Live tracking → Replay one move**. The **DEMO / SIMULATED** badge and evidence provenance identify fixture output. Restart with `-Mode live` for real hardware. Both modes use separate databases and upload directories under `data/`.
+Open [Hardware setup](http://127.0.0.1:3000/setup) and connect the local edge.
+Map actual cameras in Capture, load existing geometry in Reconstruct/Project, and
+choose an installed Ollama model for scene features. Normal launchers run live mode.
+Offline test fixtures are not a workspace data source.
 
 On Windows, each live **Capture session** also replaces the contents of
 `\\wsl.localhost\Ubuntu\home\wilson\test_images` with the available fresh frames,
@@ -75,7 +79,7 @@ pnpm install --frozen-lockfile
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r apps/edge/requirements.txt
 bash scripts/doctor.sh
-bash scripts/start.sh demo          # or live
+bash scripts/start.sh live
 ```
 
 Linux uses OpenCV on V4L2. Display counting uses xrandr when available. On Wayland, confirm that you put the projector window on the extended display yourself. Keep the web UI at the default port 3000 and the loopback edge at 8000.
@@ -100,4 +104,4 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Run pytest with the repo virtual environment. Browser checks start a production web server and a fresh simulated edge on ports 3000 and 8000; stop any local SpaceGit instances first. Set `SPACEGIT_BROWSER` to use an existing Chrome/Chromium binary. Evidence, scope, and hardware limitations are in [verification](docs/verification.md). See [architecture](docs/architecture.md), [security and privacy](docs/security.md), [deployment](docs/deployment.md), [reconstruction](docs/reconstruction.md), and the [three-minute demo](docs/demo.md).
+Run pytest with the repo virtual environment. Browser contracts use isolated test inputs; operator checks use real services. Set `SPACEGIT_BROWSER` to use an existing Chrome/Chromium binary. Evidence, scope, and hardware limitations are in [verification](docs/verification.md). See [architecture](docs/architecture.md), [security and privacy](docs/security.md), [deployment](docs/deployment.md), [reconstruction](docs/reconstruction.md).

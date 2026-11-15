@@ -25,7 +25,7 @@ export function edgeAdapter(token: string) {
     projectionModels: () => api<{models:string[];provider:'ollama'}>(token,'/projection/models'),
     projectionChat: (model:string,prompt:string,objects:ProjectionObject[],messages:ProjectionMessage[]) =>
       api<ProjectionPlan>(token,'/projection/chat',{model,prompt,objects,messages},'POST',135000),
-    rig: () => api<Rig>(token,'/rig'),
+    rig: async () => {const rig=await api<Rig>(token,'/rig');if(rig.mode!=='live'||rig.feeds.some(feed=>feed.status==='simulated'))throw Error('Start the edge in live mode to use real data.');return rig;},
     devices: () => api<{cameras: CameraDevice[]}>(token,'/devices'),
     saveRig: (settings: RigSettings) => api<Rig>(token,'/rig/settings',settings),
     start: () => api<Rig>(token,'/rig/start',{}),

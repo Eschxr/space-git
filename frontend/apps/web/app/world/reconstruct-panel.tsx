@@ -16,7 +16,6 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
   const pick=comparison==='before'?before:after;
   const asset=useSceneAsset(edge,remote,local);
   const scene=asset.data&&'scene' in asset.data?asset.data.scene:pick?.scene;
-  const simulated=pick?.evidence?.mode==='demo'&&!asset.data;
   const object=scene?.objects.find(card=>card.id===selected);
   const availableAssets=jobs.filter(job=>job.asset&&job.commit===pick?.id).flatMap(job=>
     (job.artifacts??[{name:'sparse.ply'}]).filter(a=>/\.(ply|glb|gltf)$/i.test(a.name)).map(a=>({id:job.asset!,name:a.name,label:a.name+' · '+job.id.slice(0,6),job})));
@@ -32,7 +31,7 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
     </div>
     {viewer==='rig'?<CameraRigViewer edge={edge}/>:<div className="nw-workspace-grid">
       <section className="nw-panel nw-view-panel" aria-label="Reconstruction">
-        <div className="nw-panel-head"><div><h2>Scene viewport</h2><p>{asset.data ? 'MODEL ASSET' : simulated ? 'SIMULATED STUDY' : 'STORED LAYOUT GEOMETRY'}</p></div>
+        <div className="nw-panel-head"><div><h2>Scene viewport</h2><p>{asset.data ? 'MODEL ASSET' : 'STORED LAYOUT GEOMETRY'}</p></div>
           <div className="nw-actions">
             <button className="nw-btn nw-tiny" disabled={!before} aria-pressed={comparison==='before'&&!asset.data} onClick={()=>{setLocal(null);setRemote(null);setComparison('before');setSelected('');}}>Previous</button>
             <button className="nw-btn nw-tiny" disabled={!after} aria-pressed={comparison==='after'&&!asset.data} onClick={()=>{setLocal(null);setRemote(null);setComparison('after');setSelected('');}}>Current</button>
@@ -41,13 +40,13 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
           </div>
         </div>
         <div className="nw-viewport" data-testid="reconstruction">
-          {scene||asset.data ? <RenderScene scene={scene} simulated={simulated} selected={selected} select={setSelected}
+          {scene||asset.data ? <RenderScene scene={scene} selected={selected} select={setSelected}
             cloud={displayPoints} asset={asset.data} lowPower={low} reset={reset}
             diff={comparison==='overlay'&&!asset.data?rows:[]}/> : <div className="nw-render-note">Commit a snapshot or open a PLY, GLB or glTF model to inspect it here.</div>}
           {(scene||asset.data)&&<div className="nw-view-corner">ORBIT · PAN · ZOOM</div>}
         </div>
         <div className="nw-panel-foot">
-          <label className="nw-check"><input type="checkbox" checked={cloud} onChange={e=>setCloud(e.target.checked)} disabled={!simulated&&!(asset.data&&'geometry' in asset.data)}/>Point cloud</label>
+          <label className="nw-check"><input type="checkbox" checked={cloud} onChange={e=>setCloud(e.target.checked)} disabled={!(asset.data&&'geometry' in asset.data)}/>Point cloud</label>
           <label className="nw-check"><input type="checkbox" checked={low} onChange={e=>setLow(e.target.checked)}/>Reduce quality</label>
           <span>{comparison==='overlay'&&!asset.data?'WIREFRAME = PREVIOUS POSITION':'DRAG TO ORBIT · RIGHT DRAG TO PAN'}</span>
         </div>
@@ -55,8 +54,8 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
       <div className="nw-side-stack">
         <section className="nw-panel"><div className="nw-panel-head"><div><h2>Provenance</h2><p>RECONSTRUCTION STATUS</p></div><Icon name="cube"/></div>
           <dl className="nw-meta"><div><dt>Source</dt><dd>{local?local.name:remote?.name??pick?.message??'Awaiting scene'}</dd></div>
-            <div><dt>Confidence</dt><dd>{remote?.job ? remote.job.stage+' · unverified geometry' : asset.data ? 'Unverified asset' : simulated ? 'Fixture geometry' : scene ? 'Saved layout · no dense estimate' : 'Unavailable'}</dd></div>
-            <div><dt>Coordinates</dt><dd>{asset.data ? 'Asset units unless calibrated' : simulated ? 'Synthetic metres' : scene?.frame==='wall-world-meters'&&pick?.evidence?.calibration?'Calibrated wall metres':isNormalized(scene)?'Normalized wall':'Layout units'}</dd></div>
+            <div><dt>Confidence</dt><dd>{remote?.job ? remote.job.stage+' · unverified geometry' : asset.data ? 'Unverified asset' : scene ? 'Saved layout · no dense estimate' : 'Unavailable'}</dd></div>
+            <div><dt>Coordinates</dt><dd>{asset.data ? 'Asset units unless calibrated' : scene?.frame==='wall-world-meters'&&pick?.evidence?.calibration?'Calibrated wall metres':isNormalized(scene)?'Normalized wall':'Layout units'}</dd></div>
             <div><dt>Capture</dt><dd>{pick?.evidence?.timestamp ? new Date(pick.evidence.timestamp*1000).toLocaleString() : 'No capture timestamp'}</dd></div></dl>
           {asset.message&&<p role={asset.error?'alert':'status'} className="nw-fine">{asset.message}</p>}
           {edge&&<div className="nw-asset-actions">

@@ -29,13 +29,13 @@ export default function UploadPanel({api, space, busy, run, uploaded}: {api: Tra
       <p>Slots 1–4 map to cam_01–cam_04, regardless of preview order. Only complete live sessions are eligible. Set up cameras in <a href="/world">Capture</a>.</p>
       <button className="nw-btn" disabled={busy} onClick={() => run('Loading rig sessions', async () => {
         const connected = edge ?? edgeAdapter(await connectLocal());
-        const items = await connected.sessions();
+        const items = (await connected.sessions()).filter(item => item.mode === 'live');
         setSessions(items); setSessionsLoaded(true);
         setSessionId(old => items.some(item => item.id === old) ? old : '');
       })}>Connect edge & load sessions</button>
       {sessionsLoaded && !sessions.length && <p role="status">No saved rig sessions yet. Save a complete four-camera session in Capture, or upload four files above.</p>}
       {!!sessions.length && <label>Saved session<select className="nw-field" value={sessionId} disabled={busy} onChange={e => setSessionId(e.target.value)}>
-        <option value="">Choose a session</option>{sessions.map(item => <option key={item.id} value={item.id} disabled={!completeSession(item)}>{date(new Date(item.created * 1000).toISOString())} · {short(item.id)} · {item.feeds.length}/4 {completeSession(item) ? '' : '(incomplete or simulated)'}</option>)}
+        <option value="">Choose a session</option>{sessions.map(item => <option key={item.id} value={item.id} disabled={!completeSession(item)}>{date(new Date(item.created * 1000).toISOString())} · {short(item.id)} · {item.feeds.length}/4 {completeSession(item) ? '' : '(incomplete)'}</option>)}
       </select></label>}
       <button className="nw-btn" disabled={busy || !edge || !session || !completeSession(session)} onClick={() => run('Importing rig images', async () => {
         if (!session || !edge || !completeSession(session)) return;

@@ -4,8 +4,8 @@ import {useEffect, useRef, useState} from 'react';
 import type {Edge} from './edge';
 import {validateObjects, type ProjectionMessage, type ProjectionObject} from './projection-objects';
 
-export function ProjectionAssistant({edge,connect,objects,change,undo,canUndo,playing,setPlaying,activate}:{
-  edge:Edge|null;connect:()=>Promise<unknown>;objects:ProjectionObject[];change:(next:ProjectionObject[])=>void;
+export function ProjectionAssistant({sceneReady,edge,connect,objects,change,undo,canUndo,playing,setPlaying,activate}:{
+  sceneReady:boolean;edge:Edge|null;connect:()=>Promise<unknown>;objects:ProjectionObject[];change:(next:ProjectionObject[])=>void;
   undo:()=>void;canUndo:boolean;playing:boolean;setPlaying:(value:boolean)=>void;activate:()=>void;
 }) {
   const [models,setModels]=useState<string[]>([]),[model,setModel]=useState('');
@@ -42,7 +42,7 @@ export function ProjectionAssistant({edge,connect,objects,change,undo,canUndo,pl
     finally{if(mounted.current)setLoading(false);}
   }
   async function send(){
-    if(!edge||!model||!prompt.trim()||pending.current)return;
+    if(!sceneReady||!edge||!model||!prompt.trim()||pending.current)return;
     pending.current=true;setBusy(true);setIssue('');
     const request=prompt.trim();
     try{
@@ -70,7 +70,7 @@ export function ProjectionAssistant({edge,connect,objects,change,undo,canUndo,pl
         {models.map(name=><option key={name}>{name}</option>)}
       </select></label><button className="nw-btn nw-tiny" disabled={busy||loading} onClick={()=>void refresh()}>{!edge?'Connect local edge':'Refresh models'}</button></div>
       <div className="nw-chat-log" ref={log} role="log" aria-label="Scene conversation" aria-live="polite">
-        {!messages.length&&<div className="nw-chat-empty"><strong>Your scene, with a little imagination.</strong><p>Try “Add a blue floating sphere” or “Make it spin and move it left”.</p><small>The model edits the added objects. Your source scene stays intact.</small></div>}
+        {!messages.length&&<div className="nw-chat-empty"><strong>Edit your reconstructed space.</strong><p>Describe the 3D feature or animation you want to add.</p><small>The model edits the added objects. Your source scene stays intact.</small></div>}
         {messages.map((entry,index)=><div className={'nw-chat-message is-'+entry.role} key={index}><span>{entry.role==='user'?'YOU':'OLLAMA'}</span><p>{entry.content}</p></div>)}
         {busy&&<p role="status" className="nw-fine">Planning scene edits… Larger models can take up to two minutes.</p>}
       </div>
@@ -78,11 +78,11 @@ export function ProjectionAssistant({edge,connect,objects,change,undo,canUndo,pl
       <form className="nw-prompt-form" onSubmit={event=>{event.preventDefault();void send();}}>
         <label className="nw-sr-only" htmlFor="scene-prompt">Describe a scene edit</label>
         <textarea id="scene-prompt" className="nw-field" rows={3} maxLength={2000} placeholder="Add something to this world…" value={prompt} disabled={busy} onChange={event=>setPrompt(event.target.value)}/>
-        <button className="nw-btn nw-primary" disabled={busy||!edge||!model||!prompt.trim()}>{busy?'Thinking…':'Send to model'}</button>
+        <button className="nw-btn nw-primary" disabled={busy||!sceneReady||!edge||!model||!prompt.trim()}>{busy?'Thinking…':'Send to model'}</button>
       </form>
       {issue&&<p className="nw-assistant-error" role="alert">{issue}</p>}
-      <p className="nw-fine">No model connection? Use the quick adds below. Edits last for this session.</p>
-      <fieldset disabled={busy} className="nw-object-controls">
+      <p className="nw-fine">Load a reconstruction to enable scene edits. Manual controls work without Ollama. Edits last for this session.</p>
+      <fieldset disabled={busy||!sceneReady} className="nw-object-controls">
         <legend>Added objects <span>{objects.length} / 12</span></legend>
         <div className="nw-actions">{(['sphere','cube','torus','cone'] as const).map(shape=><button className="nw-btn nw-tiny" key={shape} disabled={objects.length>=12} onClick={()=>add(shape)}>+ {shape}</button>)}</div>
         {item&&<>

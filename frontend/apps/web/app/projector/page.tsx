@@ -68,10 +68,10 @@ export default function Projector(){
    setActionIssue('');
   }catch(e){setActionIssue((e as Error).message+' Open the projector page in Chrome or Edge if fullscreen is unavailable.');}
  }
- const visible=event?.mode==='demo'?event:(full&&bound&&!issue?allowed?event:event&&{...event,overlay:null,state:'SETUP_REQUIRED' as const}:null);
+ const visible=full&&bound&&!issue?allowed?event:event&&{...event,overlay:null,state:'SETUP_REQUIRED' as const}:null;
  return <main className={'projection '+(full?'fullscreen':'')}>
   <OverlayView event={visible} wizard={!issue&&full&&bound?wizard:null} output={full?size:event?.calibration?.output??size}/>
-  {full&&(!bound||!wizard&&!allowed)&&event?.mode!=='demo'&&<div className="projector-test">
+  {full&&(!bound||!wizard&&!allowed)&&<div className="projector-test">
    <strong>SpaceGit projection test</strong>
    <span>{size.join(' × ')}</span>
    <span>{issue||(!bound?'Connecting to the local edge…':'Start calibration in Setup · Esc exits fullscreen')}</span>

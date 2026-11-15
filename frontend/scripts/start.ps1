@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('demo','live')][string]$Mode = 'demo',
+  [ValidateSet('live')][string]$Mode = 'live',
   [string]$Python = '',
   [string]$CaptureDirectory = '\\wsl.localhost\Ubuntu\home\wilson\test_images',
   [ValidateRange(1024,65535)][int]$Port = 3000,

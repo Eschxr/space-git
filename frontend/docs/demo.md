@@ -1,12 +1,19 @@
-# Three-minute demo
+# Present the real reconstruction
 
-| Time | Action |
-| --- | --- |
-| 0:00–0:25 | Show the webcam diagnostics, measured workspace, and the projector profile in Setup. State whether the demo is live or simulated. |
-| 0:25–0:55 | In Live tracking, select a textured notebook, commit its pose, then move it. In fixture mode start **Replay one move** and identify the generated observations. |
-| 0:55–1:40 | Restore the baseline, move the notebook along the projected route, and hold it in place. Cover it to demonstrate tracking loss. Show the verification evidence and save the verified child revision. |
-| 1:40–2:10 | Orbit the parametric scene, select an object, and show its dimensions. Compare with a revision. |
-| 2:10–2:40 | Open a paired HTTPS phone link and upload a JPEG to the selected revision if the gateway is configured. |
-| 2:40–3:00 | Review a branch merge conflict and the candidate. Show the public read-only gallery. |
+1. Start the live edge, web app and existing Ollama service on the reconstruction laptop.
+2. In Project, connect and load the current reconstruction. Select the desired
+   cam_01..cam_04 view or open its PLY/GLB file directly. Confirm the source filename.
+3. Detect displays, select the connected projector, open the output window and
+   enter fullscreen. Keep the control page and mirrored preview on the main screen.
+4. Select an installed Ollama model and request a 3D feature or animation. Refine
+   its color, size and relative viewer position through chat or manual controls.
+5. Show undo, animation pause and blackout. Original reconstruction bytes stay intact.
+6. Use Image history for the actual four-view evidence and explicit human review.
 
-If the display or camera is unavailable, run the whole web workflow with fixture provenance visible. Do not present fixture metrics as hardware accuracy.
+There is no bundled scene, simulated capture, replay or synthetic history. If a
+service or source file is unavailable, show that state and correct its configuration
+before continuing. AI-generated additions are decorative geometry placed in viewer
+coordinates; they are not calibrated anchors or recovered surfaces. Keep per-view
+clouds separate and do not claim fusion, registration or physical accuracy.
+
+See [Project setup](../../docs/project-demo-mvp.md) for startup and output-folder settings.

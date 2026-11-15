@@ -11,3 +11,4 @@ models/
 *.pth
 *.pt
 local-data/
+*.ply

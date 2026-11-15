@@ -11,15 +11,39 @@
 </p>
 
 <p align="center">
-  <a href="#run-the-integrated-app">Run locally</a> ·
+  <a href="#try-new-worlds">Try New Worlds</a> ·
+  <a href="#run-the-integrated-app">Connect cameras and inference</a> ·
   <a href="docs/workflow-and-system-diagrams.md">System diagrams</a> ·
   <a href="docs/devpost-submission.md">Project story</a> ·
-  <a href="docs/devpost-media-and-demo.md">Demo walkthrough</a>
+  <a href="frontend/docs/new-worlds.md">Walkthrough guide</a>
 </p>
 
-<img src="frontend/docs/screenshots/phase2/studio.png" alt="SpaceGit Hardware Studio showing a simulated gallery wall, 3D viewport, and object inspector" width="100%">
+<img src="frontend/docs/screenshots/new-worlds-capture.png" alt="SpaceGit New Worlds showing four simulated camera feeds and the camera pole layout" width="100%">
 
-*Hardware Studio preview with a simulated gallery wall and metric object poses.*
+*New Worlds Capture screen with four simulated camera feeds.*
+
+## Try New Worlds
+
+Install Node.js 24 and pnpm 11.25.0, then run these commands on the laptop you
+want to use.
+
+```powershell
+git clone https://github.com/Eschxr/space-git.git
+cd space-git/frontend
+pnpm install --frozen-lockfile
+pnpm dev --port 3121
+```
+
+Open [New Worlds](http://127.0.0.1:3121/) at the homepage. Use **Start Demo**
+to walk through four-camera capture, a revision comparison, a 3D study, and an
+animated office in the projector view. This simulated walkthrough runs in the
+browser. The `/world` address opens the same workspace.
+
+When a teammate pushes an update, stop the local server and run
+`git pull --ff-only`, `pnpm install --frozen-lockfile`, and `pnpm dev --port 3121`
+from the same directory. Git syncs the application code. Browser walkthrough
+history stays in that browser, while real captures and approved revisions live
+in the workstation's PostgreSQL and Silo stores.
 
 ## What changed in the room?
 
@@ -31,7 +55,7 @@ Each revision keeps the original evidence and the review decisions behind it.
 | Workspace | What you can explore |
 | --- | --- |
 | **Image history** | Named spaces, four-view captures, camera-local changes, and approved revisions you can compare. |
-| **Hardware Studio** | Measured layouts, object poses, branches, and layout comparisons. |
+| **New Worlds** | Inspect a four-camera capture, compare spatial revisions, and explore an animated office. |
 | **Reconstruct and Project** | Inspect a model or point cloud and present a scene on a second display. The Camera rig viewer can load per-view PointDiT PLYs from a configured WSL environment. |
 
 ## From capture to commit
@@ -51,6 +75,9 @@ matching observations from the same camera. Ambiguous matches stay in review.
 Tracks belong to a space and a camera, and changes are measured in image space.
 
 ## Run the integrated app
+
+Use this setup for real image review and optional camera capture. The integrated
+frontend uses port 3101.
 
 Use Git, Docker Desktop/Compose, Node.js 24 and pnpm 11.25.0. Camera control also
 needs a separate Python 3.12 environment. The Docker API/vision worker use Python

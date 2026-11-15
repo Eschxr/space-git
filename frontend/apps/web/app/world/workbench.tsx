@@ -149,7 +149,8 @@ export default function World({projector=false}:{projector?:boolean}) {
       const result=live?await edge.capture():demoCapture((demo.captures[0]?.sample??1)+1);
       if(live)setLiveCaptures(old=>[result,...old]);else setDemo(old=>({...old,captures:[result,...old.captures].slice(0,36)}));
       setActive(live?null:result);
-      setNotice('Session saved with '+result.feeds.length+' '+(result.mode==='demo'?'simulated':'live')+' frames. Open Version control to save a scene revision.');
+      if(result.pointdit?.status==='succeeded')setView('reconstruct');
+      setNotice(result.pointdit?.status==='succeeded'?'Session saved and four PLY files generated in your WSL PointDiT output folder.':'Session saved with '+result.feeds.length+' '+(result.mode==='demo'?'simulated':'live')+' frames. Open Version control to save a scene revision.');
     });
   };
   const commit=(branch:string,message:string)=>{

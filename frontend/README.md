@@ -24,6 +24,36 @@ py -3.12 -m venv .venv
 
 Open [Hardware setup](http://127.0.0.1:3000/setup) and paste the printed local operator key. Go to **Live tracking → Replay one move**. The **DEMO / SIMULATED** badge and evidence provenance identify fixture output. Restart with `-Mode live` for real hardware. Both modes use separate databases and upload directories under `data/`.
 
+On Windows, each live **Capture session** also replaces the contents of
+`\\wsl.localhost\Ubuntu\home\wilson\test_images` with the available fresh frames,
+named `01_radial_a.jpg`, `02_radial_b.jpg`, `03_radial_c.jpg`, and `04_floor.jpg`.
+Numeric prefixes define the export order regardless of the preview sequence.
+Previous sessions remain in local history.
+Use `scripts/start.ps1 -Mode live -CaptureDirectory 'C:\path\to\images'` to change
+the export folder. When starting the edge directly, set `SPACEGIT_CAPTURE_EXPORT_DIR`.
+
+The Windows startup script also enables `SPACEGIT_POINTDIT_WSL=1`. Live capture then
+requires four fresh views. After exporting them, it activates `/home/wilson/pointdit/.venv`
+in Ubuntu as `wilson` and runs `bash scripts/demo_l_512.sh`. Keep the capture page open
+while generation runs. The app confirms completion after verifying four updated PLYs
+in `\\wsl.localhost\Ubuntu\home\wilson\pointdit\generation\pretrained-pointditl-512-mixdata-nodinov3-240c1a4f\test_images`.
+Each PLY uses its image stem with `_pointcloud.ply`. Generation logs are kept beside
+the local edge database in `pointdit/<session-id>.log`. Failure preserves captured
+images and reports an error. The command has a 30-minute limit. The supplied script
+reads the fixed `/home/wilson/test_images` path, so this workflow uses the default
+capture directory. Direct edge launches without `SPACEGIT_POINTDIT_WSL=1` export
+the available views without invoking PointDiT.
+
+After successful PointDiT generation, **Reconstruct → Camera rig** displays the
+supplied multi-camera HTML viewer inside SpaceGit. It loads `camera_poses NEWEST.json`
+from the bundled `public/camera-rig/camera-poses.json` and the four latest generated
+PLYs through authenticated edge requests. Viewer camera 1 is Floor, camera 2 is
+Radial A, camera 3 is Radial B, and camera 4 is Radial C. **Reload PLY files** loads
+the latest output again. The original viewer's orbit, camera view, transform gizmo,
+denoise, config import/export, and PLY controls are available. **Scene revision**
+opens the existing revision viewer. The embedded viewer bundles its original
+Three.js 0.170.0 modules and license in `public/camera-rig/vendor`.
+
 ## Start on Linux
 
 ```bash

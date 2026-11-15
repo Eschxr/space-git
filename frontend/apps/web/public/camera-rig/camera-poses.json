@@ -1,0 +1,129 @@
+{
+  "version": 2,
+  "background": "#999999",
+  "editMode": false,
+  "gizmo": {
+    "mode": "translate",
+    "local": true,
+    "snap": false
+  },
+  "selected": 2,
+  "cameraView": {
+    "position": [
+      1.1280420313391137,
+      2.2000898660614494,
+      -3.6762285406380437
+    ],
+    "target": [
+      2.0219515358569358,
+      1.1234978489110503,
+      0.15470942268505955
+    ]
+  },
+  "cameras": [
+    {
+      "name": "Camera 1 · Floor",
+      "position": [
+        2.373218602015345,
+        1.1453954195993563,
+        -0.42737853485232397
+      ],
+      "quaternion": [
+        -0.6251629975661378,
+        0.31504348268684657,
+        -0.2982528350837853,
+        -0.6488174449374401
+      ],
+      "fov": 60,
+      "frustumDepth": 4,
+      "cloudScale": 1.2302687708123816,
+      "pointSize": 2,
+      "plyAxes": "cv",
+      "showCloud": true,
+      "denoise": {
+        "on": false,
+        "radius": 0.01,
+        "minN": 6,
+        "voxel": 0
+      }
+    },
+    {
+      "name": "Camera 2 · Radial A",
+      "position": [
+        1.8925091511852956,
+        0.9182052753060094,
+        -1.246736416177541
+      ],
+      "quaternion": [
+        -0.8257570372857744,
+        -0.1443363994580713,
+        0.2532875280443203,
+        -0.4828433983205093
+      ],
+      "fov": 73,
+      "frustumDepth": 4,
+      "cloudScale": 0.831763771102671,
+      "pointSize": 1.3,
+      "plyAxes": "cv",
+      "showCloud": true,
+      "denoise": {
+        "on": false,
+        "radius": 0.011,
+        "minN": 4,
+        "voxel": 0
+      }
+    },
+    {
+      "name": "Camera 3 · Radial B",
+      "position": [
+        1.870328945647944,
+        0.9976719440410463,
+        0.1716251732748697
+      ],
+      "quaternion": [
+        0.3728549037304244,
+        0.4267080623905177,
+        -0.7992348115158018,
+        0.20030767912490785
+      ],
+      "fov": 60,
+      "frustumDepth": 4,
+      "cloudScale": 1,
+      "pointSize": 4.1,
+      "plyAxes": "cv",
+      "showCloud": true,
+      "denoise": {
+        "on": false,
+        "radius": 0.01,
+        "minN": 6,
+        "voxel": 0
+      }
+    },
+    {
+      "name": "Camera 4 · Radial C",
+      "position": [
+        3.106003997770026,
+        0.9935788287473566,
+        -0.46227060868398684
+      ],
+      "quaternion": [
+        0.6001048944380348,
+        -0.36134958741216416,
+        0.6187329965002407,
+        0.3556263072248835
+      ],
+      "fov": 60,
+      "frustumDepth": 4,
+      "cloudScale": 1,
+      "pointSize": 2.6,
+      "plyAxes": "cv",
+      "showCloud": true,
+      "denoise": {
+        "on": false,
+        "radius": 0.01,
+        "minN": 6,
+        "voxel": 0
+      }
+    }
+  ]
+}

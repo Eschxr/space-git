@@ -64,9 +64,9 @@ export function useToken(){
  return [key||(automatic?session:''),setToken,connectLocal] as const;
 }
 export const apiBase=()=>localHost()?'http://127.0.0.1:8000':'';
-export async function api<T>(token:string,path:string,body?:unknown,method?:string):Promise<T>{
+export async function api<T>(token:string,path:string,body?:unknown,method?:string,timeoutMs=12000):Promise<T>{
  if(!localHost()) throw Error('Local edge controls are available on the projector workstation.');
- const r=await fetch(apiBase()+'/api/v1'+path,{headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(12000),cache:'no-store'});
+ const r=await fetch(apiBase()+'/api/v1'+path,{headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(timeoutMs),cache:'no-store'});
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(typeof data.detail==='string'?data.detail:'Request failed ('+r.status+'). Check the supplied values.');}
  return r.json() as Promise<T>;
 }

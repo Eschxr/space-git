@@ -3,6 +3,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import time
 from typing import Annotated, Literal
 
@@ -15,6 +19,8 @@ from .models import CameraInput, Id, Strict
 from .store import new_id
 
 SLOTS = (1, 2, 3, 4)
+EXPORT_NAMES = {1: "01_radial_a.jpg", 2: "02_radial_b.jpg", 3: "03_radial_c.jpg", 4: "04_floor.jpg"}
+POINTDIT_OUTPUT = Path(r"\\wsl.localhost\Ubuntu\home\wilson\pointdit\generation\pretrained-pointditl-512-mixdata-nodinov3-240c1a4f\test_images")
 DeviceIndex = Annotated[StrictInt, Field(ge=0, le=15)]
 Source = DeviceIndex | Literal["primary"] | None
 
@@ -60,6 +66,10 @@ class PoleRig:
         self.cameras = {index: Camera() for index in self.settings.sources if isinstance(index, int)}
         self.enabled = False
         self.lock = asyncio.Lock()
+        self.capture_lock = asyncio.Lock()
+        self.output_lock = asyncio.Lock()
+        self.export_directory = os.getenv("SPACEGIT_CAPTURE_EXPORT_DIR") if mode == "live" else None
+        self.generate_ply = mode == "live" and os.getenv("SPACEGIT_POINTDIT_WSL") == "1"
 
     def stop(self):
         self.enabled = False
@@ -137,6 +147,58 @@ class PoleRig:
             self.enabled = False
 
 
+def export_frames(directory, frames):
+    """Publish only this session, keeping the previous directory on write failure."""
+    target = Path(directory)
+    if not target.is_absolute() or target.name in ("", ".", "..") or target.is_symlink() or target.is_junction():
+        raise ValueError("Capture export needs an absolute directory path without a symlink")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target = target.parent.resolve(strict=True) / target.name
+    if target.exists() and not target.is_dir():
+        raise ValueError("Capture export destination must be a directory")
+    staging = Path(tempfile.mkdtemp(prefix=".spacegit-capture-", dir=target.parent))
+    backup = target.parent / (".spacegit-previous-" + new_id())
+    try:
+        for slot in SLOTS:
+            if slot in frames:
+                (staging / EXPORT_NAMES[slot]).write_bytes(frames[slot][2])
+        had_previous = target.exists()
+        if had_previous:
+            target.rename(backup)
+        try:
+            staging.rename(target)
+        except OSError:
+            if had_previous:
+                backup.rename(target)
+            raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    if backup.exists():
+        shutil.rmtree(backup)
+
+
+def generate_pointdit(log_path):
+    outputs = [POINTDIT_OUTPUT / (Path(name).stem + "_pointcloud.ply") for name in EXPORT_NAMES.values()]
+    previous = {path: path.stat().st_mtime_ns if path.exists() else None for path in outputs}
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(
+            ["wsl.exe", "-d", "Ubuntu", "-u", "wilson", "--", "bash", "-lc",
+             "cd /home/wilson/pointdit && source .venv/bin/activate && timeout --kill-after=10s 1800s bash scripts/demo_l_512.sh"],
+            stdout=log, stderr=subprocess.STDOUT, timeout=1830, check=False,
+        )
+    if result.returncode:
+        raise RuntimeError(f"PointDiT exited with code {result.returncode}. See {log_path}")
+    for path in outputs:
+        if not path.is_file() or path.stat().st_mtime_ns == previous[path]:
+            raise RuntimeError(f"PointDiT did not update {path}. See {log_path}")
+        with path.open("rb") as ply:
+            if ply.readline().strip() != b"ply":
+                raise RuntimeError(f"PointDiT produced an invalid PLY: {path}. See {log_path}")
+    return [str(path) for path in outputs]
+
+
 def routes(authorize):
     router = APIRouter(prefix="/api/v1/rig")
 
@@ -175,9 +237,30 @@ def routes(authorize):
         with rt.store.tx() as db:
             return [json.loads(row[0]) for row in db.execute("SELECT body FROM pole_captures ORDER BY rowid DESC LIMIT 50")]
 
+    @router.get("/pointclouds/{slot}")
+    async def pointcloud(slot: int, rt=Depends(authorize)):
+        rt.pole.require_live()
+        if slot not in SLOTS:
+            raise HTTPException(404, "Unknown camera position")
+        if rt.pole.capture_lock.locked():
+            raise HTTPException(409, "Wait for the current capture and PLY generation to finish")
+        async with rt.pole.output_lock:
+            path = POINTDIT_OUTPUT / (Path(EXPORT_NAMES[slot]).stem + "_pointcloud.ply")
+            try:
+                data = await asyncio.to_thread(path.read_bytes)
+            except FileNotFoundError as error:
+                raise HTTPException(404, "Capture four images and generate the PLY files first") from error
+            except OSError as error:
+                raise HTTPException(503, "Could not read the WSL PointDiT output folder") from error
+            return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+
     def save_capture(rt, order, frames):
         if not frames:
             raise HTTPException(409, "No fresh rig frames are available")
+        if rt.pole.generate_ply and (set(frames) != set(SLOTS) or not rt.pole.export_directory):
+            raise HTTPException(409, "PointDiT needs all four fresh views and an image export directory. Start every camera and capture again.")
+        if rt.pole.generate_ply and Path(rt.pole.export_directory) != Path(r"\\wsl.localhost\Ubuntu\home\wilson\test_images"):
+            raise HTTPException(409, "The PointDiT script reads /home/wilson/test_images. Set CaptureDirectory to \\\\wsl.localhost\\Ubuntu\\home\\wilson\\test_images.")
         ident = new_id()
         with rt.store.tx(True) as db:
             info = dict(id=ident, created=time.time(), mode="live", feeds=list(frames), order=order,
@@ -185,14 +268,35 @@ def routes(authorize):
             db.execute("INSERT INTO pole_captures VALUES(?,?)", (ident, json.dumps(info)))
             for slot, frame in frames.items():
                 db.execute("INSERT INTO pole_frames VALUES(?,?,?)", (ident, slot, frame[2]))
+        if rt.pole.export_directory:
+            try:
+                export_frames(rt.pole.export_directory, frames)
+            except (OSError, ValueError) as error:
+                raise HTTPException(503, f"Session saved locally, but image export failed: {error}") from error
+        if rt.pole.generate_ply:
+            log_path = rt.store.path.parent / "pointdit" / (ident + ".log")
+            try:
+                files = generate_pointdit(log_path)
+                info["pointdit"] = dict(status="succeeded", files=files, log=str(log_path))
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                info["pointdit"] = dict(status="failed", error=str(error), log=str(log_path))
+                with rt.store.tx(True) as db:
+                    db.execute("UPDATE pole_captures SET body=? WHERE id=?", (json.dumps(info), ident))
+                raise HTTPException(503, f"Images saved, but PLY generation failed: {error}") from error
+            with rt.store.tx(True) as db:
+                db.execute("UPDATE pole_captures SET body=? WHERE id=?", (json.dumps(info), ident))
         return info
 
     @router.post("/captures", status_code=201)
     async def capture(rt=Depends(authorize)):
-        async with rt.pole.lock:
-            order = rt.pole.settings.order
-            frames = {slot: frame for slot in order if (frame := rt.pole.frame(slot))}
-        return await asyncio.to_thread(save_capture, rt, order, frames)
+        if rt.pole.capture_lock.locked():
+            raise HTTPException(409, "A capture is already exporting or generating PLY files. Wait for it to finish.")
+        async with rt.pole.capture_lock:
+            async with rt.pole.lock:
+                order = rt.pole.settings.order
+                frames = {slot: frame for slot in order if (frame := rt.pole.frame(slot))}
+            async with rt.pole.output_lock:
+                return await asyncio.to_thread(save_capture, rt, order, frames)
 
     @router.get("/captures/{ident}/frames/{slot}")
     def saved_frame(ident: Id, slot: int, rt=Depends(authorize)):

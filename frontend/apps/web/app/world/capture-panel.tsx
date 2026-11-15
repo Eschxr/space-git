@@ -32,7 +32,7 @@ export function CapturePanel({rig, edge, active, captures, busy, capture, choose
             <span className="nw-chip"><i/>{active ? active.feeds.length+'/4 '+(active.mode==='live'?'SAVED':'SIMULATED') : liveSource ? liveCount+'/4 LIVE' : '4/4 SIMULATED'}</span>
           </div>
         </div>
-        {busy==='capture'&&<progress className="nw-progress" aria-label="Capture progress"/>}
+        {busy==='capture'&&<><progress className="nw-progress" aria-label="Capture progress"/><p role="status">Saving the session and waiting for any configured PLY generation to finish.</p></>}
         <div className="nw-feeds">{order.map(id=>{
           const cam=CAMERAS.find(camera=>camera.id===id)!;
           const feed=rig.feeds.find(f=>f.id===cam.id);

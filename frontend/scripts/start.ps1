@@ -1,6 +1,7 @@
 param(
   [ValidateSet('demo','live')][string]$Mode = 'demo',
-  [string]$Python = ''
+  [string]$Python = '',
+  [string]$CaptureDirectory = '\\wsl.localhost\Ubuntu\home\wilson\test_images'
 )
 $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
@@ -9,6 +10,8 @@ try {
   if (-not (Test-Path -LiteralPath $Python)) { throw 'Create .venv and install apps/edge/requirements.txt first. See README.' }
   if (-not (Test-Path -LiteralPath 'node_modules')) { throw 'Run pnpm install --frozen-lockfile first.' }
   $env:SPACEGIT_MODE = $Mode
+  $env:SPACEGIT_CAPTURE_EXPORT_DIR = $CaptureDirectory
+  $env:SPACEGIT_POINTDIT_WSL = '1'
   $env:SPACEGIT_LOCAL_SESSION = '1'
   if (-not $env:SPACEGIT_TOKEN) { $env:SPACEGIT_TOKEN = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N') }
   $env:NEXT_TELEMETRY_DISABLED = '1'

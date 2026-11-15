@@ -5,9 +5,135 @@ import pytest
 
 from spacegit_edge.main import make_app
 from spacegit_edge.rig import camera_mapping
+from spacegit_edge.rig import EXPORT_NAMES, export_frames
+from spacegit_edge import rig as rig_module
 
 TOKEN = "pole-test-only-operator-token-2026"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def test_pointcloud_downloads_use_capture_roles_and_require_authorization(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.setattr(rig_module, "POINTDIT_OUTPUT", output)
+    for slot, name in EXPORT_NAMES.items():
+        (output / (rig_module.Path(name).stem + "_pointcloud.ply")).write_bytes(b"ply\n" + bytes([slot]))
+    app = make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/rig/pointclouds/4").status_code == 401
+        for slot in (4, 1, 2, 3):
+            result = client.get(f"/api/v1/rig/pointclouds/{slot}", headers=AUTH)
+            assert result.status_code == 200
+            assert result.content == b"ply\n" + bytes([slot])
+            assert result.headers["cache-control"] == "no-store"
+        assert client.get("/api/v1/rig/pointclouds/5", headers=AUTH).status_code == 404
+        (output / "04_floor_pointcloud.ply").unlink()
+        assert client.get("/api/v1/rig/pointclouds/4", headers=AUTH).status_code == 404
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_four_camera_capture_exports_before_generating_ply(tmp_path, monkeypatch, fails):
+    monkeypatch.setenv("SPACEGIT_POINTDIT_WSL", "1")
+    monkeypatch.setenv("SPACEGIT_CAPTURE_EXPORT_DIR", r"\\wsl.localhost\Ubuntu\home\wilson\test_images")
+    monkeypatch.setenv("SPACEGIT_RIG_CAMERAS", "0,1,2,3")
+    calls = []
+
+    def export(directory, frames):
+        assert set(frames) == {1, 2, 3, 4}
+        calls.append("export")
+
+    def generate(log):
+        assert calls == ["export"]
+        calls.append("generate")
+        if fails:
+            raise RuntimeError("model failed")
+        return ["01_radial_a_pointcloud.ply", "02_radial_b_pointcloud.ply",
+                "03_radial_c_pointcloud.ply", "04_floor_pointcloud.ply"]
+
+    monkeypatch.setattr(rig_module, "export_frames", export)
+    monkeypatch.setattr(rig_module, "generate_pointdit", generate)
+    app = make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)
+    with TestClient(app) as client:
+        pole = app.state.runtime.pole
+        pole.enabled = True
+        for index in range(3):
+            pole.cameras[index].latest = (time.time(), {}, b"jpeg")
+        assert client.post("/api/v1/rig/captures", headers=AUTH).status_code == 409
+        assert calls == []
+        pole.cameras[3].latest = (time.time(), {}, b"floor")
+        result = client.post("/api/v1/rig/captures", headers=AUTH)
+        assert result.status_code == (503 if fails else 201)
+        assert calls == ["export", "generate"]
+        saved = client.get("/api/v1/rig/captures", headers=AUTH).json()[0]
+        assert saved["pointdit"]["status"] == ("failed" if fails else "succeeded")
+        if not fails:
+            assert len(saved["pointdit"]["files"]) == 4
+
+
+def test_pointdit_checks_fresh_output_and_activates_wsl_environment(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.setattr(rig_module, "POINTDIT_OUTPUT", output)
+
+    def run(command, **kwargs):
+        assert command[:7] == ["wsl.exe", "-d", "Ubuntu", "-u", "wilson", "--", "bash"]
+        assert "source .venv/bin/activate" in command[-1]
+        assert "bash scripts/demo_l_512.sh" in command[-1]
+        for name in EXPORT_NAMES.values():
+            (output / (rig_module.Path(name).stem + "_pointcloud.ply")).write_bytes(b"ply\nend_header\n")
+        return rig_module.subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(rig_module.subprocess, "run", run)
+    assert len(rig_module.generate_pointdit(tmp_path / "run.log")) == 4
+    monkeypatch.setattr(rig_module.subprocess, "run", lambda *args, **kwargs: rig_module.subprocess.CompletedProcess(args, 0))
+    with pytest.raises(RuntimeError, match="did not update"):
+        rig_module.generate_pointdit(tmp_path / "stale.log")
+
+
+def test_capture_exports_named_frames_and_replaces_previous_contents(tmp_path, monkeypatch):
+    destination = tmp_path / "test_images"
+    destination.mkdir()
+    (destination / "old.jpg").write_bytes(b"old image")
+    monkeypatch.setenv("SPACEGIT_CAPTURE_EXPORT_DIR", str(destination))
+    monkeypatch.setenv("SPACEGIT_RIG_CAMERAS", "0,1,2,3")
+    app = make_app(path=tmp_path / "db.sqlite", mode="live", token=TOKEN)
+    with TestClient(app) as client:
+        pole = app.state.runtime.pole
+        pole.enabled = True
+        pole.settings = pole.settings.model_copy(update={"order": (4, 3, 2, 1)})
+        for slot in (1, 2, 3, 4):
+            pole.cameras[slot - 1].latest = (time.time(), {}, bytes([slot]))
+        first = client.post("/api/v1/rig/captures", headers=AUTH)
+        assert first.status_code == 201
+        assert sorted(path.name for path in destination.iterdir()) == list(EXPORT_NAMES.values())
+        for slot, name in EXPORT_NAMES.items():
+            assert (destination / name).read_bytes() == bytes([slot])
+        pole.cameras[0].latest = (time.time(), {}, b"new A")
+        for index in (1, 2, 3):
+            pole.cameras[index].latest = None
+        assert client.post("/api/v1/rig/captures", headers=AUTH).status_code == 201
+        assert [path.name for path in destination.iterdir()] == [EXPORT_NAMES[1]]
+        assert (destination / EXPORT_NAMES[1]).read_bytes() == b"new A"
+        ident = first.json()["id"]
+        assert client.get(f"/api/v1/rig/captures/{ident}/frames/4", headers=AUTH).content == b"\x04"
+
+
+def test_export_failure_preserves_previous_folder(tmp_path, monkeypatch):
+    destination = tmp_path / "test_images"
+    destination.mkdir()
+    (destination / "previous.jpg").write_bytes(b"previous session")
+    original_rename = type(destination).rename
+
+    def fail_publish(path, target):
+        if path.name.startswith(".spacegit-capture-"):
+            raise OSError("Destination unavailable")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(type(destination), "rename", fail_publish)
+    with pytest.raises(OSError, match="Destination unavailable"):
+        export_frames(str(destination), {1: (time.time(), {}, b"new session")})
+    assert (destination / "previous.jpg").read_bytes() == b"previous session"
+    assert list(tmp_path.iterdir()) == [destination]
 
 
 def test_mapping_checks_physical_slot_order():

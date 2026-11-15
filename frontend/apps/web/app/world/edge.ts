@@ -27,7 +27,8 @@ export function edgeAdapter(token: string) {
     start: () => api<Rig>(token,'/rig/start',{}),
     stop: () => api<Rig>(token,'/rig/stop',{}),
     sessions: () => api<Capture[]>(token,'/rig/captures'),
-    capture: () => api<Capture>(token,'/rig/captures',{}),
+    capture: () => api<Capture>(token,'/rig/captures',{},'POST',1850000),
+    pointcloud: (slot: number, signal: AbortSignal) => getFile('/rig/pointclouds/'+slot,signal),
     preview: (id: number, signal: AbortSignal, capture?: string) => getFile(
       capture ? '/rig/captures/'+segment(capture)+'/frames/'+id : '/rig/frames/'+id,signal,2 * 1024 * 1024,2000),
     history: () => api<History>(token,'/commits'),

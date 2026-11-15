@@ -6,9 +6,11 @@ import {Icon} from '../components/icons';
 import {isNormalized,type Asset,type Delta} from './domain';
 import {type Edge} from './edge';
 import {RenderScene,useSceneAsset} from './render-scene';
+import {CameraRigViewer} from './camera-rig-viewer';
 
 export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refreshJobs}:{before?:Commit;after?:Commit;rows:Delta[];edge:Edge|null;jobs:Job[];openProject:(commit:Commit|undefined,remote:Asset|null,local:File|null)=>void;refreshJobs:()=>void}) {
   const [comparison,setComparison]=useState<'after'|'before'|'overlay'>('after');
+  const [viewer,setViewer]=useState<'rig'|'scene'>(edge?'rig':'scene');
   const [selected,setSelected]=useState(''),[cloud,setCloud]=useState(false),[low,setLow]=useState(false),[reset,setReset]=useState(0);
   const [local,setLocal]=useState<File|null>(null),[remote,setRemote]=useState<Asset|null>(null);
   const pick=comparison==='before'?before:after;
@@ -22,9 +24,13 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
   return <>
     <div className="nw-titlebar">
       <div><div className="nw-eyebrow"><span/> 03 / SPATIAL MODEL</div><h1>Reconstruct</h1><p>Explore scene geometry and inspect how the room changed.</p></div>
-      <div className="nw-actions"><button className="nw-btn nw-primary" onClick={()=>openProject(pick,asset.data?remote:null,asset.data?local:null)}><Icon name="screen"/>Open projector view</button></div>
+      <div className="nw-actions">
+        <button className="nw-btn" aria-pressed={viewer==='rig'} onClick={()=>setViewer('rig')}>Camera rig</button>
+        <button className="nw-btn" aria-pressed={viewer==='scene'} onClick={()=>setViewer('scene')}>Scene revision</button>
+        <button className="nw-btn nw-primary" onClick={()=>openProject(pick,asset.data?remote:null,asset.data?local:null)}><Icon name="screen"/>Open projector view</button>
+      </div>
     </div>
-    <div className="nw-workspace-grid">
+    {viewer==='rig'?<CameraRigViewer edge={edge}/>:<div className="nw-workspace-grid">
       <section className="nw-panel nw-view-panel" aria-label="Reconstruction">
         <div className="nw-panel-head"><div><h2>Scene viewport</h2><p>{asset.data ? 'MODEL ASSET' : simulated ? 'SIMULATED STUDY' : 'STORED LAYOUT GEOMETRY'}</p></div>
           <div className="nw-actions">
@@ -69,6 +75,6 @@ export function ReconstructPanel({before,after,rows,edge,jobs,openProject,refres
           </>:<p className="nw-fine">No stable object identities are attached to this geometry.</p>}
         </section>
       </div>
-    </div>
+    </div>}
   </>;
 }
